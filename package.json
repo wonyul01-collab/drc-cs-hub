@@ -1,0 +1,13 @@
+{
+  "name": "drc-cs-hub",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "web:dev": "pnpm --filter @drc/web dev",
+    "web:build": "pnpm --filter @drc/web build",
+    "worker": "pnpm --filter @drc/worker start",
+    "worker:probe": "pnpm --filter @drc/worker probe"
+  }
+}

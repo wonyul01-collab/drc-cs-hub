@@ -4,7 +4,7 @@
 
 ## 작업 방식
 - Phase 단위로 진행. **Phase마다 멈추고** 결과·테스트 방법·다음 계획을 보고 → 담당자 승인 후 다음 Phase.
-- 현재 단계: **Phase 0 (조사·설계) 완료, 승인 대기**
+- 현재 단계: **Phase 1 (기반 + 문의 수집) 개발 완료 → 담당자 설치·실측 대기**
 - 외부 API 명세는 기억에 의존하지 말고 공식 문서 확인 후 `docs/api-notes.md`에 출처와 함께 기록.
 - **비용 원칙: 유료 서비스 사용 금지 (2026-11-23 담당자 결정). 월 0원 구성만.** 무료 플랜도 약관상 상업 이용 금지면 쓰지 않음 (예: Vercel Hobby).
 - 무료 구성: 웹=Cloudflare Pages(정적 React 앱), DB=Supabase Free, 작업기=사무실 PC, AI=지식DB 템플릿(→로컬 AI 선택), 알림=이메일(+무료 메신저 봇). 상세: `docs/design.md` ★ 무료 전용안.
@@ -16,8 +16,14 @@
 ## 구조
 - `apps/web` React 정적 앱 (Cloudflare Pages) — 마켓 API를 **직접 호출하지 않음**. DB에 "등록 대기"만 기록.
 - `apps/worker` Node.js 상시 실행 (고정 IP 장비) — 수집·AI·등록·알림·스케줄 전부 담당.
-- `packages/shared` DB 스키마, 규칙(`rules.yaml`), 금지표현(`forbidden_phrases.yaml`), 프롬프트, 타입.
-- DB/로그인/파일: Supabase. 언어: TypeScript(pnpm 모노레포).
+- `packages/shared` 공통 타입, 운영시간 엔진, 공휴일 목록, 개인정보 마스킹. (Phase 2: 규칙 `rules.yaml`, 금지표현)
+- DB: `supabase/migrations/*.sql`을 Supabase SQL Editor에서 실행 (ORM 없이 SQL + supabase-js). 여러 번 실행해도 안전하게 작성.
+- 웹: Vite + React + Tailwind 정적 앱 → Cloudflare Pages. 권한은 전부 RLS로.
+- 작업기: `node --env-file=.env --import tsx src/index.ts` (빌드 없이 실행), Windows는 NSSM 서비스.
+- 네이버 엔드포인트 파라미터는 미확인 → `apps/worker/src/naver/sources.ts`의 `NAVER_ENDPOINTS`만 고치면 됨. 사무실 PC `pnpm worker:probe` 결과로 확정.
+
+## 명령
+- 테스트: `pnpm test` · 타입 검사: `pnpm typecheck` · 웹 빌드: `pnpm web:build`
 
 ## 운영 시간
 - 평일 09:00~18:00 Asia/Seoul (설정값). 법정공휴일·대체공휴일·회사 휴무일 제외.

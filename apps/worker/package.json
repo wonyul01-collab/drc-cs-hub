@@ -1,0 +1,24 @@
+{
+  "name": "@drc/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env --import tsx src/index.ts",
+    "probe": "node --env-file=.env --import tsx src/probe.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@drc/shared": "workspace:*",
+    "@supabase/supabase-js": "2.119.2",
+    "bcryptjs": "3.0.3",
+    "node-cron": "4.6.0",
+    "tsx": "4.23.15"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3",
+    "vitest": "5.1.1"
+  }
+}
