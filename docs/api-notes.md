@@ -130,3 +130,11 @@
 | `claude-opus-5-5` | (필요 시) 최고 품질 | $4.00 / $20.00 |
 
 출처: Anthropic 공식 모델·가격표 (2026-11-03 기준 캐시). 모델명은 설정(`AI_MODEL_CLASSIFY`, `AI_MODEL_DRAFT`)으로 분리.
+
+## 11. 무료 전용안 추가 조사 (2026-11-23)
+
+| 항목 | 결과 | 확인 | 출처 |
+|---|---|---|---|
+| Cloudflare Pages 무료 상업 이용 | 상업 이용 금지 조항 못 찾음. 약관 우려는 대용량 미디어 전송 쪽. 요금제 페이지는 Free를 "중요하지 않은 개인·취미 프로젝트용"으로 안내. 무료 한도: 사이트당 파일 2만 개, 월 빌드 500회 | 🟡 | developers.cloudflare.com/pages/platform/limits , developers.cloudflare.com/plans , cloudflare.com/terms (원문 재확인 필요) |
+| Gemini API 무료 구간 데이터 | 무료 사용 시 입력·출력을 구글이 제품 개선에 사용, 사람 검토 가능 (2026-03-23 시행 약관). 유료는 개선에 미사용 | ✅ | ai.google.dev/gemini-api/terms , ai.google.dev/gemini-api/docs/logs-policy |
+| 카카오워크 Free 플랜 | 멤버 30명 제한, 전자결재 제외(2026-07-01 전체 적용). 봇 사용 가능 여부 ❌ | 🟡 | news.bizwatch.co.kr/article/mobile/2026/01/30/0039 |

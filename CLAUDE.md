@@ -6,11 +6,13 @@
 - Phase 단위로 진행. **Phase마다 멈추고** 결과·테스트 방법·다음 계획을 보고 → 담당자 승인 후 다음 Phase.
 - 현재 단계: **Phase 0 (조사·설계) 완료, 승인 대기**
 - 외부 API 명세는 기억에 의존하지 말고 공식 문서 확인 후 `docs/api-notes.md`에 출처와 함께 기록.
-- 비용 원칙: 무료 오픈소스 → 기존 구독 → 꼭 필요할 때만 유료. 유료는 월 비용표로 먼저 질문.
+- **비용 원칙: 유료 서비스 사용 금지 (2026-11-23 담당자 결정). 월 0원 구성만.** 무료 플랜도 약관상 상업 이용 금지면 쓰지 않음 (예: Vercel Hobby).
+- 무료 구성: 웹=Cloudflare Pages(정적 React 앱), DB=Supabase Free, 작업기=사무실 PC, AI=지식DB 템플릿(→로컬 AI 선택), 알림=이메일(+무료 메신저 봇). 상세: `docs/design.md` ★ 무료 전용안.
+- 고객 문의 내용을 "무료 대가로 데이터를 학습에 쓰는" 외부 AI에 보내지 않음 (예: Gemini 무료 구간).
 - 사용자는 비개발자. 설명은 쉬운 한국어, 명령어는 복사해서 바로 실행 가능하게.
 
 ## 구조
-- `apps/web` Next.js (Vercel) — 마켓 API를 **직접 호출하지 않음**. DB에 "등록 대기"만 기록.
+- `apps/web` React 정적 앱 (Cloudflare Pages) — 마켓 API를 **직접 호출하지 않음**. DB에 "등록 대기"만 기록.
 - `apps/worker` Node.js 상시 실행 (고정 IP 장비) — 수집·AI·등록·알림·스케줄 전부 담당.
 - `packages/shared` DB 스키마, 규칙(`rules.yaml`), 금지표현(`forbidden_phrases.yaml`), 프롬프트, 타입.
 - DB/로그인/파일: Supabase. 언어: TypeScript(pnpm 모노레포).
