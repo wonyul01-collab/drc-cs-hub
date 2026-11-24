@@ -1,5 +1,5 @@
 import { maskId, maskName, maskPii, type InquiryUpsert } from "@drc/shared";
-import { kstDate, parseKstDate, pick, RateLimiter, requestJson, type FetchLike } from "../http.ts";
+import { describeShape, kstDate, parseKstDate, pick, RateLimiter, requestJson, type FetchLike } from "../http.ts";
 import { MAX_PAGES, type InquirySource } from "../source.ts";
 import { NAVER_BASE, NaverTokenProvider } from "./auth.ts";
 
@@ -151,8 +151,15 @@ export function naverSources(cfg: { clientId: string; clientSecret: string }, fe
       const nowIso = new Date().toISOString();
       const rows: InquiryUpsert[] = [];
       const raw: Obj[] = [];
+      let shape: string | undefined;
+      let request: string | undefined;
       for (let page = 1; page <= MAX_PAGES; page++) {
-        const res = await client.get(ep.path, ep.params(from, to, page), label);
+        const query = ep.params(from, to, page);
+        const res = await client.get(ep.path, query, label);
+        if (page === 1) {
+          shape = describeShape(res);
+          request = `${ep.path}?${new URLSearchParams(query)}`;
+        }
         const items = listOf(res);
         raw.push(...items);
         for (const it of items) {
@@ -162,7 +169,7 @@ export function naverSources(cfg: { clientId: string; clientSecret: string }, fe
         const total = totalPagesOf(res);
         if (!items.length || (total !== undefined && page >= total) || items.length < 100) break;
       }
-      return { rows, rawKeys: keysOf(raw) };
+      return { rows, rawKeys: keysOf(raw), shape, request };
     },
   });
 

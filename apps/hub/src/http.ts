@@ -90,3 +90,26 @@ export function parseKstDate(v: unknown): string | null {
 export function kstDate(d: Date): string {
   return new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 10);
 }
+
+/**
+ * 응답 구조 요약 (점검용) — 값은 숨기고 항목 이름·종류만. 숫자는 건수 계열(total/count/page/size)만 표시.
+ * 예: {contents: 배열(0), page: 1, totalElements: 0, timestamp: 글자}
+ */
+export function describeShape(v: unknown, depth = 3): string {
+  if (Array.isArray(v)) {
+    const inner = v.length && depth > 0 && v[0] && typeof v[0] === "object" ? ` 첫항목${describeShape(v[0], depth - 1)}` : "";
+    return `배열(${v.length})${inner}`;
+  }
+  if (v && typeof v === "object") {
+    if (depth <= 0) return "{…}";
+    const parts = Object.entries(v as Record<string, unknown>).map(([k, x]) => {
+      if (typeof x === "number") return /total|count|page|size|code/i.test(k) ? `${k}: ${x}` : `${k}: 숫자`;
+      if (typeof x === "string") return /code|status|message/i.test(k) && x.length < 60 ? `${k}: "${x}"` : `${k}: 글자`;
+      if (typeof x === "boolean") return `${k}: 참거짓`;
+      if (x === null) return `${k}: 없음`;
+      return `${k}: ${describeShape(x, depth - 1)}`;
+    });
+    return `{${parts.join(", ")}}`;
+  }
+  return typeof v;
+}

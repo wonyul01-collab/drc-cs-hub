@@ -30,12 +30,16 @@ async function main() {
   if (!sources.length) out("⚠ 네이버·쿠팡 키가 하나도 없습니다. .env 파일을 확인하세요.");
 
   const to = new Date();
-  const from = new Date(to.getTime() - 6 * 86400e3);
   for (const s of sources) {
+    // 조회 가능한 최대 기간으로 (네이버 29일, 쿠팡 6일)
+    const days = Math.max(1, s.maxWindowDays - 1);
+    const from = new Date(to.getTime() - days * 86400e3);
     out(`■ ${s.label}`);
     try {
-      const { rows, rawKeys } = await s.fetch(from, to);
-      out(`  ✅ 접속 성공 — 최근 6일 ${rows.length}건`);
+      const { rows, rawKeys, shape, request } = await s.fetch(from, to);
+      out(`  ✅ 접속 성공 — 최근 ${days}일 ${rows.length}건`);
+      if (request) out(`  요청: ${request}`);
+      if (shape) out(`  응답 구조: ${shape}`);
       out(`  필드: ${rawKeys.join(", ") || "(문의 없음)"}`);
       const answered = rows.filter((r) => r.platform_answered).length;
       out(`  이미 답변됨: ${answered}건 / 개인정보 포함: ${rows.filter((r) => r.pii_detected).length}건`);

@@ -7,7 +7,7 @@ export interface InquirySource {
   label: string;
   /** 한 번에 조회할 수 있는 최대 기간(일). 넘으면 잘라서 여러 번 조회 */
   maxWindowDays: number;
-  fetch(from: Date, to: Date): Promise<{ rows: InquiryUpsert[]; rawKeys: string[] }>;
+  fetch(from: Date, to: Date): Promise<{ rows: InquiryUpsert[]; rawKeys: string[]; shape?: string; request?: string }>;
 }
 
 /** 페이지 반복 안전장치 */

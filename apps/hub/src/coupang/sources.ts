@@ -1,5 +1,5 @@
 import { maskPii, type InquiryUpsert } from "@drc/shared";
-import { kstDate, parseKstDate, pick, RateLimiter, requestJson, type FetchLike } from "../http.ts";
+import { describeShape, kstDate, parseKstDate, pick, RateLimiter, requestJson, type FetchLike } from "../http.ts";
 import { MAX_PAGES, type InquirySource } from "../source.ts";
 import { COUPANG_BASE, coupangAuthorization } from "./auth.ts";
 
@@ -134,6 +134,7 @@ export function coupangSources(cfg: { vendorId: string; accessKey: string; secre
       const nowIso = new Date().toISOString();
       const rows: InquiryUpsert[] = [];
       const raw: Obj[] = [];
+      let shape: string | undefined;
       for (let page = 1; page <= MAX_PAGES; page++) {
         const res = await client.get(
           COUPANG_ENDPOINTS.online(cfg.vendorId),
@@ -147,6 +148,7 @@ export function coupangSources(cfg: { vendorId: string; accessKey: string; secre
           },
           "쿠팡 상품문의 조회",
         );
+        if (page === 1) shape = describeShape(res);
         const { items, totalPages } = dataList(res);
         raw.push(...items);
         for (const it of items) {
@@ -155,7 +157,7 @@ export function coupangSources(cfg: { vendorId: string; accessKey: string; secre
         }
         if (!items.length || (totalPages !== undefined && page >= totalPages) || items.length < 50) break;
       }
-      return { rows, rawKeys: keysOf(raw) };
+      return { rows, rawKeys: keysOf(raw), shape };
     },
   };
 
@@ -168,6 +170,7 @@ export function coupangSources(cfg: { vendorId: string; accessKey: string; secre
       const nowIso = new Date().toISOString();
       const rows: InquiryUpsert[] = [];
       const raw: Obj[] = [];
+      let shape: string | undefined;
       for (let page = 1; page <= MAX_PAGES; page++) {
         const res = await client.get(
           COUPANG_ENDPOINTS.callcenter(cfg.vendorId),
@@ -181,6 +184,7 @@ export function coupangSources(cfg: { vendorId: string; accessKey: string; secre
           },
           "쿠팡 고객센터 문의 조회",
         );
+        if (page === 1) shape = describeShape(res);
         const { items, totalPages } = dataList(res);
         raw.push(...items);
         for (const it of items) {
@@ -189,7 +193,7 @@ export function coupangSources(cfg: { vendorId: string; accessKey: string; secre
         }
         if (!items.length || (totalPages !== undefined && page >= totalPages) || items.length < 30) break;
       }
-      return { rows, rawKeys: keysOf(raw) };
+      return { rows, rawKeys: keysOf(raw), shape };
     },
   };
 
