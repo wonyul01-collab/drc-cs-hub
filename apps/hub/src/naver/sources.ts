@@ -153,6 +153,7 @@ export function naverSources(cfg: { clientId: string; clientSecret: string }, fe
       const raw: Obj[] = [];
       let shape: string | undefined;
       let request: string | undefined;
+      let prevFirst: string | undefined;
       for (let page = 1; page <= MAX_PAGES; page++) {
         const query = ep.params(from, to, page);
         const res = await client.get(ep.path, query, label);
@@ -161,13 +162,18 @@ export function naverSources(cfg: { clientId: string; clientSecret: string }, fe
           request = `${ep.path}?${new URLSearchParams(query)}`;
         }
         const items = listOf(res);
+        // 페이지 번호가 무시되어 같은 목록이 반복되면 중단
+        const first = items.length ? JSON.stringify(items[0]) : undefined;
+        if (first && first === prevFirst) break;
+        prevFirst = first;
         raw.push(...items);
         for (const it of items) {
           const r = mapper(it, nowIso);
           if (r) rows.push(r);
         }
         const total = totalPagesOf(res);
-        if (!items.length || (total !== undefined && page >= total) || items.length < 100) break;
+        // 상품문의는 size=100을 보내도 10건씩 오는 것을 확인(2026-11-24 점검) → 건수가 아니라 마지막 페이지 여부로 판단
+        if (!items.length || res.last === true || (total !== undefined && page >= total)) break;
       }
       return { rows, rawKeys: keysOf(raw), shape, request };
     },

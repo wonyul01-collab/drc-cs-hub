@@ -138,3 +138,12 @@
 | Cloudflare Pages 무료 상업 이용 | 상업 이용 금지 조항 못 찾음. 약관 우려는 대용량 미디어 전송 쪽. 요금제 페이지는 Free를 "중요하지 않은 개인·취미 프로젝트용"으로 안내. 무료 한도: 사이트당 파일 2만 개, 월 빌드 500회 | 🟡 | developers.cloudflare.com/pages/platform/limits , developers.cloudflare.com/plans , cloudflare.com/terms (원문 재확인 필요) |
 | Gemini API 무료 구간 데이터 | 무료 사용 시 입력·출력을 구글이 제품 개선에 사용, 사람 검토 가능 (2026-03-23 시행 약관). 유료는 개선에 미사용 | ✅ | ai.google.dev/gemini-api/terms , ai.google.dev/gemini-api/docs/logs-policy |
 | 카카오워크 Free 플랜 | 멤버 30명 제한, 전자결재 제외(2026-07-01 전체 적용). 봇 사용 가능 여부 ❌ | 🟡 | news.bizwatch.co.kr/article/mobile/2026/01/30/0039 |
+
+## 12. 실측 결과 (2026-11-24, 메인 PC `4-check.bat`)
+
+| 항목 | 결과 |
+|---|---|
+| 네이버 토큰·IP | ✅ 접속 성공 (전자서명 방식·호출 IP 등록 확인) |
+| 상품문의 `GET /v1/contents/qnas` | 200. 응답 `{contents[], page(1부터), size, totalElements, totalPages, sort, first, last}`. **size=100 요청에도 size=10으로 응답** → 10건씩 페이지 넘김 필요(반영). fromDate/toDate 인식 여부는 문의가 0건이라 미확정 |
+| 주문 문의 `GET /v1/pay-user/inquiries` | 200. Spring 페이지 형식 `{content[], pageable{pageNumber(0부터), pageSize:100}, totalElements, totalPages, last}`. page=1 → pageNumber 0 (1부터 세는 방식), size=100 인식, startSearchDate/endSearchDate(YYYY-MM-DD) 오류 없음 |
+| 쿠팡 | 403 "Your ip address … is not allowed" — 연동정보가 사방넷으로 설정되어 있어 사무실 IP 미등록. 사방넷 확인 대기 |
