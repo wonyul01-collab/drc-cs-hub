@@ -130,3 +130,25 @@ describe("작업기 엔진 — 운영 시간에만 일한다", () => {
     expect(calls).toHaveLength(3);
   });
 });
+
+describe("최근 30일 다시 가져오기", () => {
+  const kst = (s: string) => new Date(`${s}:00+09:00`);
+  it("요청이 있으면 이번 한 번만 30일 전부터 수집 (예전 키로 0건 기록된 경우 복구)", async () => {
+    const store = new FakeStore();
+    const { src, calls } = fakeSource([row("1")], 30);
+    const engine = new Engine({ store, sources: [src], workerId: "t", lookbackDays: 7, dataGoKrKey: null });
+    const t1 = kst("2026-11-30T09:00");
+    await engine.tick(t1);
+    expect(calls[0][0].getTime()).toBe(t1.getTime() - 7 * DAY);
+
+    // 수집 기록을 지우고 30일 요청 (db.requestBackfill과 같은 효과)
+    store.runs = [];
+    store.backfill = 30;
+    calls.length = 0;
+    const t2 = kst("2026-11-30T09:10");
+    await engine.tick(t2);
+    expect(calls[0][0].getTime()).toBe(t2.getTime() - 30 * DAY);
+    expect(store.backfill).toBeNull(); // 한 번 쓰면 사라짐
+    expect(store.inquiries.size).toBe(1); // 중복 저장 없음
+  });
+});

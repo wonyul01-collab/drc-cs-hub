@@ -31,7 +31,7 @@ export function splitWindow(from: Date, to: Date, maxDays: number): Array<[Date,
 export async function collectSource(src: InquirySource, store: Store, now: Date, lookbackDays: number): Promise<SourceResult> {
   const started = new Date();
   const last = await store.lastSuccessfulWindowEnd(src.channel, src.kind);
-  const earliest = new Date(now.getTime() - lookbackDays * DAY);
+  const earliest = new Date(now.getTime() - Math.min(lookbackDays, 30) * DAY);
   const from = last ? new Date(Math.max(last.getTime() - OVERLAP_MS, earliest.getTime())) : earliest;
 
   let fetched = 0;

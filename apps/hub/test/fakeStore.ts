@@ -39,6 +39,12 @@ export class FakeStore implements Store {
     return { operating: DEFAULT_OPERATING, intervalMin: 10 };
   }
   async audit() {}
+  backfill: number | null = null;
+  async takeBackfill() {
+    const b = this.backfill;
+    this.backfill = null;
+    return b;
+  }
 }
 
 export const BUILTIN = BUILTIN_HOLIDAYS;

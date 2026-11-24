@@ -33,6 +33,8 @@ export interface Store {
   saveHolidays(rows: Array<{ date: string; name: string; source: "builtin" | "api" }>): Promise<void>;
   loadOperating(): Promise<{ operating: OperatingConfig; intervalMin: number }>;
   audit(action: string, detail: Record<string, unknown>, actor?: string): Promise<void>;
+  /** "최근 N일 다시 가져오기" 요청이 있으면 N을 돌려주고 요청을 지운다 */
+  takeBackfill(): Promise<number | null>;
 }
 
 export interface User {
@@ -298,6 +300,24 @@ export class HubDb implements Store {
 
   async audit(action: string, detail: Record<string, unknown>, actor = "worker"): Promise<void> {
     this.db.prepare("insert into audit_log (actor, action, detail) values (?,?,?)").run(actor, action, JSON.stringify(detail));
+  }
+
+  setSetting(key: string, value: unknown) {
+    this.db.prepare("insert into settings (key, value) values (?, ?) on conflict (key) do update set value = excluded.value").run(key, JSON.stringify(value));
+  }
+
+  /** 수집 기록을 지워서 다음 수집 때 처음부터(N일 전부터) 다시 가져오게 한다. 이미 받은 문의는 중복 저장되지 않음 */
+  requestBackfill(days: number, channel?: string) {
+    if (channel) this.db.prepare("delete from collect_runs where channel = ?").run(channel);
+    else this.db.prepare("delete from collect_runs").run();
+    this.setSetting("backfill_days", days);
+  }
+
+  async takeBackfill(): Promise<number | null> {
+    const days = this.getSetting<number>("backfill_days");
+    if (!days) return null;
+    this.db.prepare("delete from settings where key = 'backfill_days'").run();
+    return Number(days);
   }
 
   getSetting<T = unknown>(key: string): T | null {

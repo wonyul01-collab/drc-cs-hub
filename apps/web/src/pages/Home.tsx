@@ -2,7 +2,7 @@ import { CHANNEL_LABEL, KIND_LABEL, type Channel, type InquiryKind } from "@drc/
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card, ErrorBox } from "../components/ui.tsx";
-import { api, fmtDateTime, fmtRelative } from "../lib.ts";
+import { api, fmtDateTime, fmtRelative, useAuth } from "../lib.ts";
 
 interface Counts {
   newTotal: number;
@@ -23,7 +23,30 @@ interface Run {
   error: string | null;
 }
 
+function BackfillButton() {
+  const [msg, setMsg] = useState<string | null>(null);
+  async function go() {
+    if (!confirm("스마트스토어·쿠팡 문의를 최근 30일치 다시 가져올까요?\n(이미 있는 문의는 중복으로 쌓이지 않습니다)")) return;
+    try {
+      await api("/api/collect/backfill", { method: "POST", body: {} });
+      setMsg("요청했습니다. 업무시간이면 1분 안에 시작합니다. 잠시 뒤 새로고침 해보세요.");
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    }
+  }
+  return (
+    <div className="mt-4 border-t border-gray-200 pt-4">
+      <button onClick={go} className="rounded-xl border-2 border-blue-600 px-5 py-3 font-bold text-blue-700">
+        ↻ 최근 30일 문의 다시 가져오기
+      </button>
+      <span className="ml-3 text-gray-600">예전 문의가 안 보일 때 한 번 눌러주세요.</span>
+      {msg && <p className="mt-2 font-semibold text-green-800">{msg}</p>}
+    </div>
+  );
+}
+
 export default function Home() {
+  const { user } = useAuth();
   const [counts, setCounts] = useState<Counts | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -77,7 +100,7 @@ export default function Home() {
       <Card>
         <h2 className="text-xl font-bold">채널별 수집 상태</h2>
         {runs.length === 0 ? (
-          <p className="mt-3 text-gray-600">아직 수집 기록이 없습니다. 작업기를 켜면 운영 시간에 10분마다 수집합니다.</p>
+          <p className="mt-3 text-gray-600">아직 수집 기록이 없습니다. 업무시간(평일 09~18시)에 10분마다 수집합니다.</p>
         ) : (
           <ul className="mt-3 divide-y divide-gray-200">
             {runs.map((r) => (
@@ -95,6 +118,16 @@ export default function Home() {
           </ul>
         )}
       </Card>
+
+      <p className="text-gray-600">
+        ※ 판매자센터에서 이미 답변한 문의는 &lsquo;처리할 신규 문의&rsquo;에 세지 않습니다. 통합 창구에서 상태를 &lsquo;전체 상태&rsquo;로 두면 모두 볼 수 있습니다.
+      </p>
+      {user?.role === "admin" && (
+        <Card>
+          <h2 className="text-xl font-bold">관리</h2>
+          <BackfillButton />
+        </Card>
+      )}
 
       <Card>
         <h2 className="text-xl font-bold">판매자센터에서 직접 확인할 곳</h2>

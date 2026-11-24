@@ -68,7 +68,10 @@ export class Engine {
 
       const due = now.getTime() - this.lastCollectAt >= this.intervalMin * MIN;
       if (due) {
-        if (this.d.sources.length) this.lastResults = await collectAll(this.d.sources, this.d.store, now, this.d.lookbackDays);
+        // "다시 가져오기" 요청이 있으면 이번 한 번은 그 기간만큼 거슬러 올라가 수집
+        const backfill = await this.d.store.takeBackfill();
+        if (backfill) log.info(`최근 ${backfill}일 문의를 다시 가져옵니다.`);
+        if (this.d.sources.length) this.lastResults = await collectAll(this.d.sources, this.d.store, now, backfill ?? this.d.lookbackDays);
         this.lastCollectAt = now.getTime();
         try {
           await this.d.afterCollect?.();

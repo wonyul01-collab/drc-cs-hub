@@ -95,3 +95,17 @@ describe("데이터 파일 (SQLite)", () => {
     expect(readdirSync(join(dir, "backups")).length).toBe(1);
   });
 });
+
+describe("다시 가져오기 요청", () => {
+  it("채널별 수집 기록을 지우고 30일 요청을 한 번만 돌려준다", async () => {
+    const db = new HubDb(":memory:");
+    const run = (channel: string) => ({ channel, kind: "product_qna", started_at: "2026-11-24T00:00:00Z", finished_at: "2026-11-24T00:00:01Z", window_from: "2026-11-17T00:00:00Z", window_to: "2026-11-24T00:00:00Z", fetched: 0, inserted: 0, ok: true, error: null });
+    await db.recordRun(run("smartstore"));
+    await db.recordRun(run("coupang"));
+    db.requestBackfill(30, "smartstore");
+    expect(await db.lastSuccessfulWindowEnd("smartstore", "product_qna")).toBeNull();
+    expect(await db.lastSuccessfulWindowEnd("coupang", "product_qna")).not.toBeNull();
+    expect(await db.takeBackfill()).toBe(30);
+    expect(await db.takeBackfill()).toBeNull();
+  });
+});

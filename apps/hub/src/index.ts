@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { networkInterfaces } from "node:os";
 import { join, resolve } from "node:path";
 import cron from "node-cron";
@@ -42,6 +43,21 @@ async function main() {
   if (cfg.coupang) sources.push(...coupangSources(cfg.coupang));
   else log.warn("쿠팡 키가 없어 쿠팡 수집을 건너뜁니다.");
 
+  // 마켓 키가 바뀌었으면(또는 처음이면) 그 채널은 최근 30일을 다시 가져온다 — 키 자체는 저장하지 않고 지문만 비교
+  const fp = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
+  const keyPrints: Array<[string, string | null]> = [
+    ["smartstore", cfg.naver ? fp(cfg.naver.clientId) : null],
+    ["coupang", cfg.coupang ? fp(`${cfg.coupang.vendorId}|${cfg.coupang.accessKey}`) : null],
+  ];
+  for (const [channel, print] of keyPrints) {
+    if (!print) continue;
+    if (db.getSetting<string>(`key_print_${channel}`) !== print) {
+      db.requestBackfill(30, channel);
+      db.setSetting(`key_print_${channel}`, print);
+      log.info(`${channel === "smartstore" ? "스마트스토어" : "쿠팡"} 키가 새로 설정되어 최근 30일 문의를 다시 가져옵니다 (업무시간에).`);
+    }
+  }
+
   const engine = new Engine({ store: db, sources, workerId: cfg.workerId, lookbackDays: cfg.lookbackDays, dataGoKrKey: cfg.dataGoKrKey, afterCollect: () => void processDrafts(db) });
 
   // 화면 제공
@@ -51,7 +67,10 @@ async function main() {
     log.info("──────────────────────────────────────────────");
     log.info("DRC CS 허브가 켜졌습니다.");
     log.info(`  이 PC에서:      http://localhost:${cfg.port}`);
-    for (const a of lanAddresses(cfg.port)) log.info(`  다른 PC에서:    ${a}`);
+    const lan = lanAddresses(cfg.port);
+    const isPrivate = (u: string) => /\/\/(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(u);
+    for (const a of lan.filter(isPrivate)) log.info(`  다른 PC에서:    ${a}   ← 다른 PC 크롬 주소창에 이 주소 입력 (localhost 아님)`);
+    if (!lan.some(isPrivate)) log.warn("  사내망 주소(192.168… 등)를 찾지 못했습니다. 이 PC가 공유기 없이 인터넷에 직접 연결된 것 같습니다 — 설치가이드 '다른 PC 접속이 안 될 때' 참고");
     log.info(`  데이터 파일:    ${db.path}`);
     log.info(`  설정 파일:      ${settings.path}`);
     log.info(`  백업 폴더:      ${cfg.backupDir}`);

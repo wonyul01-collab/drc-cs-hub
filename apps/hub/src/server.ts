@@ -198,6 +198,13 @@ export function createHubServer({ db, webDir, backup }: ServerOptions): Server {
       return send(res, 200, { draft: db.latestDraft(id) });
     }
 
+    if (path === "/api/collect/backfill" && method === "POST") {
+      requireAdmin();
+      db.requestBackfill(30);
+      await db.audit("collect.backfill", { days: 30 }, me.login);
+      return send(res, 200, { ok: true, days: 30 });
+    }
+
     // ── 지식 DB ──
     if (path === "/api/knowledge" && method === "GET") return send(res, 200, { knowledge: db.listKnowledge(), products: db.listProducts() });
     if (path === "/api/knowledge.xlsx" && method === "GET") {
