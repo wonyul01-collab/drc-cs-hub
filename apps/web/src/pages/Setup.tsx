@@ -23,7 +23,7 @@ export default function Setup({ local, onDone }: { local: boolean; onDone: () =>
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (pw !== pw2) return setError("비밀번호 두 칸이 서로 다릅니다.");
-    if (pw.length < 8) return setError("비밀번호는 8자 이상으로 정하세요.");
+    if (pw.length < 7) return setError("비밀번호는 7자 이상으로 정하세요.");
     try {
       await api("/api/setup", { method: "POST", body: { name, login, password: pw } });
       onDone();
@@ -47,7 +47,7 @@ export default function Setup({ local, onDone }: { local: boolean; onDone: () =>
           <input required value={login} onChange={(e) => setLogin(e.target.value)} className={input} autoComplete="username" placeholder="예: admin" />
         </label>
         <label className="mt-4 block font-semibold">
-          비밀번호 (8자 이상)
+          비밀번호 (7자 이상)
           <input required type="password" value={pw} onChange={(e) => setPw(e.target.value)} className={input} autoComplete="new-password" />
         </label>
         <label className="mt-4 block font-semibold">

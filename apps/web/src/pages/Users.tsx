@@ -43,7 +43,7 @@ export default function Users() {
   }
 
   function resetPw(u: User) {
-    const pw = prompt(`${u.name}님의 새 비밀번호 (8자 이상)`);
+    const pw = prompt(`${u.name}님의 새 비밀번호 (7자 이상)`);
     if (!pw) return;
     run(() => api(`/api/users/${u.id}`, { method: "PATCH", body: { password: pw } }), `${u.name}님 비밀번호를 바꿨습니다.`);
   }
@@ -62,7 +62,7 @@ export default function Users() {
           <input
             required
             type="password"
-            placeholder="비밀번호 (8자 이상)"
+            placeholder="비밀번호 (7자 이상)"
             aria-label="비밀번호"
             autoComplete="new-password"
             value={form.password}

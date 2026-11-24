@@ -11,6 +11,8 @@ import type { HubDb, User } from "./db.ts";
 
 const COOKIE = "drc_session";
 const ROLES: Role[] = ["admin", "approver", "agent"];
+/** 비밀번호 최소 길이 (2026-11-24 담당자 요청: 7자) */
+export const PASSWORD_MIN = 7;
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -117,7 +119,7 @@ export function createHubServer({ db, webDir }: ServerOptions): Server {
       if (db.userCount() > 0) throw new HttpError(409, "이미 관리자가 있습니다.");
       if (!isLocal(req)) throw new HttpError(403, "첫 관리자는 메인 PC에서만 만들 수 있습니다.");
       const b = await readJson(req);
-      const pw = str(b.password, "비밀번호", 8, 200);
+      const pw = str(b.password, `비밀번호(${PASSWORD_MIN}자 이상)`, PASSWORD_MIN, 200);
       db.createUser(str(b.login, "아이디", 2, 40), str(b.name, "이름", 1, 40), pw, "admin");
       await db.audit("user.setup", { login: b.login }, "setup");
       return send(res, 201, { ok: true });
@@ -199,7 +201,7 @@ export function createHubServer({ db, webDir }: ServerOptions): Server {
       const b = await readJson(req);
       const role = ROLES.includes(b.role as Role) ? (b.role as Role) : "agent";
       try {
-        const u = db.createUser(str(b.login, "아이디", 2, 40), str(b.name, "이름", 1, 40), str(b.password, "비밀번호(8자 이상)", 8, 200), role);
+        const u = db.createUser(str(b.login, "아이디", 2, 40), str(b.name, "이름", 1, 40), str(b.password, `비밀번호(${PASSWORD_MIN}자 이상)`, PASSWORD_MIN, 200), role);
         await db.audit("user.create", { login: u.login, role }, me.login);
         return send(res, 201, u);
       } catch (e) {
@@ -218,7 +220,7 @@ export function createHubServer({ db, webDir }: ServerOptions): Server {
         patch.role = b.role as Role;
       }
       if (b.active !== undefined) patch.active = !!b.active;
-      if (b.password !== undefined) patch.password = str(b.password, "비밀번호(8자 이상)", 8, 200);
+      if (b.password !== undefined) patch.password = str(b.password, `비밀번호(${PASSWORD_MIN}자 이상)`, PASSWORD_MIN, 200);
       if (id === me.id && ((patch.role && patch.role !== "admin") || patch.active === false)) {
         throw new HttpError(400, "자기 자신의 관리자 권한은 해제할 수 없습니다.");
       }

@@ -115,3 +115,14 @@ describe("허브 화면 서버", () => {
     expect((await call("/api/me", { cookie: admin })).status).toBe(401);
   });
 });
+
+describe("비밀번호 최소 7자", () => {
+  it("7자는 허용, 6자는 거부", async () => {
+    // 앞 테스트에서 로그인 차단이 걸려 있으므로 세션을 직접 발급
+    const admin = `drc_session=${db.login("boss", "bosspass123")!.token}`;
+    const make = (login: string, password: string) =>
+      fetch(base + "/api/users", { method: "POST", headers: { "content-type": "application/json", cookie: admin }, body: JSON.stringify({ login, name: login, password }) });
+    expect((await make("park", "abc1234")).status).toBe(201);
+    expect((await make("choi", "abc123")).status).toBe(400);
+  });
+});
