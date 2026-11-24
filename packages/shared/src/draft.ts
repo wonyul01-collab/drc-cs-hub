@@ -119,11 +119,13 @@ export function scoreKnowledge(
   const t = norm(text);
   const kw = entry.keywords.filter((k) => k.trim() && t.includes(norm(k)));
   if (kw.length) {
-    score += Math.min(0.3, kw.length * 0.15);
+    score += Math.min(0.45, kw.length * 0.15);
     why.push(`키워드: ${kw.join(", ")}`);
   }
 
   if (!catHit && kw.length < 2) return null;
+  // 전체 상품 공통 답변은 유형만 같아서는 안 되고 키워드가 하나 이상 맞아야 함 (엉뚱한 공통 답변 방지)
+  if (!entry.products.length && kw.length === 0) return null;
   return { id: entry.id, title: entry.title, score: Math.min(1, Math.round(score * 100) / 100), why };
 }
 

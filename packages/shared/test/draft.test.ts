@@ -88,6 +88,16 @@ describe("지식 DB 초안", () => {
     const r = draft("평소 95 사이즈 고르는 법", "안심퀸 프리미엄", { channel: "coupang" });
     expect(r.route).toBe("approve");
   });
+  it("전체 상품 공통 답변은 키워드가 하나도 안 맞으면 쓰지 않음 (엉뚱한 답변 방지)", () => {
+    const common: KnowledgeEntry[] = [{ ...KB[3], id: 20, category: "material", products: [], keywords: ["생리"], answer: "생리대 대용 안내", conditions: null, minRoute: "auto" }];
+    const r = makeDraft({ channel: "smartstore", text: "흡수량이 얼마나 되나요", productName: null, piiDetected: false }, common, PRODUCTS);
+    expect(r.usedIds).toEqual([]);
+  });
+  it("키워드 3개가 맞으면 유형을 몰라도 답변 사용 (예: '양이 많은 편인데 밤에')", () => {
+    const e: KnowledgeEntry[] = [{ ...KB[3], id: 21, category: "usage", products: [], keywords: ["양이 많", "많은 편", "밤"], answer: "낮엔 A, 밤엔 B 추천", conditions: null, minRoute: "auto" }];
+    const r = makeDraft({ channel: "smartstore", text: "소변 양이 많은 편인데 밤에 걱정돼요", productName: null, piiDetected: false }, e, PRODUCTS);
+    expect(r.usedIds).toEqual([21]);
+  });
   it("지식 DB 답변에 금지 표현이 있으면 ②로 올림", () => {
     const bad: KnowledgeEntry[] = [{ ...KB[2], id: 9, answer: "세탁해도 100% 새지 않습니다." }];
     const r = makeDraft({ channel: "smartstore", text: "세탁기 돌려도 되나요", productName: "방탄팬티", piiDetected: false }, bad, PRODUCTS);
