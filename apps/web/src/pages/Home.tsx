@@ -45,6 +45,60 @@ function BackfillButton() {
   );
 }
 
+interface UpdateInfo {
+  available: boolean;
+  current: string | null;
+  latest: string | null;
+  hasUpdate: boolean;
+  error?: string;
+  restarting?: boolean;
+}
+
+function UpdateBox() {
+  const [info, setInfo] = useState<UpdateInfo | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api<UpdateInfo>("/api/update").then(setInfo).catch(() => setInfo(null));
+  }, []);
+  async function update() {
+    if (!confirm("새 버전으로 업데이트할까요?\n허브가 30초~1분 정도 꺼졌다가 자동으로 다시 켜집니다.")) return;
+    setBusy(true);
+    try {
+      const r = await api<UpdateInfo>("/api/update", { method: "POST", body: {} });
+      setMsg(r.restarting ? "업데이트 중입니다. 1분 뒤 새로고침(F5) 해주세요." : "이미 최신 버전입니다.");
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!info) return null;
+  return (
+    <div className="mt-4 border-t border-gray-200 pt-4">
+      {!info.available ? (
+        <p className="text-gray-700">
+          자동 업데이트가 꺼져 있습니다. 메인 PC에서 <b>6-auto-update-setup.bat</b> 을 한 번 실행하면 켜집니다.
+        </p>
+      ) : info.error ? (
+        <p className="text-amber-800">새 버전 확인 실패: {info.error}</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-gray-700">
+            프로그램 버전 {info.current} {info.hasUpdate ? `→ 새 버전 ${info.latest} 있음` : "(최신)"} · 평일 08:40 자동 업데이트
+          </span>
+          {info.hasUpdate && (
+            <button disabled={busy} onClick={update} className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white disabled:opacity-50">
+              ⬆ 지금 업데이트
+            </button>
+          )}
+        </div>
+      )}
+      {msg && <p className="mt-2 font-semibold text-green-800">{msg}</p>}
+    </div>
+  );
+}
+
 export default function Home() {
   const { user } = useAuth();
   const [counts, setCounts] = useState<Counts | null>(null);
@@ -126,6 +180,7 @@ export default function Home() {
         <Card>
           <h2 className="text-xl font-bold">관리</h2>
           <BackfillButton />
+          <UpdateBox />
         </Card>
       )}
 

@@ -23,6 +23,7 @@
   - 분류 회귀 사례: `packages/shared/test/fixtures/classification_cases.json` — "③인데 ①" 0건이 완료 기준. 사례는 계속 누적.
   - 지식 DB는 SQLite `knowledge`·`products` 테이블. 담당자는 **엑셀 내려받기 → 수정 → 올리기(전체 바꾸기, 자동 백업)**. 시트 「표준답변」「상품정보」. 웹에서 개별 사용 켜기/끄기·답변 수정(관리자).
   - 평가: `apps/hub/scripts/evaluate.ts <지식DB.xlsx> <결과.xlsx> <사례.json...>`
+- **자동 업데이트**: 메인 PC 폴더를 git 설치형으로 바꾸면(`6-auto-update-setup.bat`) 평일 08:40·관리자 버튼으로 `origin/main`을 받아 재시작 (`apps/hub/src/updater.ts`, `2-start.bat` 루프: 표시 파일 `update-requested` → fetch+reset --hard+install → 재시작, 비정상 종료 시 30초 뒤 재시작). **main에 push하면 다음 날 아침 사무실 PC에 반영되므로 main은 항상 동작하는 상태로 유지.**
 - 사용자는 bat 파일만 씀: `1-install.bat`(npx pnpm install) · `2-start.bat`(웹 빌드+허브 실행) · `3-settings.bat`(설정 메모장) · `4-check.bat`(연결 점검). 자동 시작은 시작프로그램 폴더 바로가기.
 - 네이버 문의 2종 엔드포인트·파라미터·응답 필드는 2026-11-24 실측으로 확정 (`docs/api-notes.md` 12장). 쿠팡은 연동정보가 사방넷으로 되어 있어 IP 미등록 — 사방넷 확인 대기, **쿠팡 키 재발급·연동정보 임의 수정 금지**.
 

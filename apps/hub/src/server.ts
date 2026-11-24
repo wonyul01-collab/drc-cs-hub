@@ -5,6 +5,7 @@ import { seoulParts, type Role } from "@drc/shared";
 import type { HubDb, User } from "./db.ts";
 import { exportKnowledgeXlsx, parseKnowledgeXlsx } from "./excel.ts";
 import { checkEdited, processDrafts } from "./pipeline.ts";
+import type { Updater } from "./updater.ts";
 
 /**
  * 화면 제공 + 데이터 API (메인 PC에서 실행, 같은 사무실 PC는 http://메인PC주소:3000 으로 접속)
@@ -102,9 +103,12 @@ export interface ServerOptions {
   webDir: string | null;
   /** 지식 DB 통째로 바꾸기 전 백업 */
   backup?: () => string;
+  updater?: Updater;
+  /** 관리자가 "지금 업데이트"를 눌렀을 때 */
+  onUpdate?: () => void;
 }
 
-export function createHubServer({ db, webDir, backup }: ServerOptions): Server {
+export function createHubServer({ db, webDir, backup, updater, onUpdate }: ServerOptions): Server {
   const limiter = new LoginLimiter();
   const webRoot = webDir ? resolve(webDir) : null;
 
@@ -203,6 +207,24 @@ export function createHubServer({ db, webDir, backup }: ServerOptions): Server {
       db.requestBackfill(30);
       await db.audit("collect.backfill", { days: 30 }, me.login);
       return send(res, 200, { ok: true, days: 30 });
+    }
+
+    if (path === "/api/update" && method === "GET") {
+      requireAdmin();
+      if (!updater) return send(res, 200, { available: false, hasUpdate: false });
+      return send(res, 200, await updater.check());
+    }
+    if (path === "/api/update" && method === "POST") {
+      requireAdmin();
+      if (!updater?.installedWithGit || !onUpdate) throw new HttpError(400, "자동 업데이트가 설정되지 않았습니다. 메인 PC에서 6-auto-update-setup.bat 을 먼저 실행하세요.");
+      const st = await updater.check();
+      if (st.error) throw new HttpError(502, `새 버전 확인 실패: ${st.error}`);
+      if (!st.hasUpdate) return send(res, 200, { ...st, restarting: false });
+      backup?.();
+      await db.audit("hub.update", { from: st.current, to: st.latest }, me.login);
+      send(res, 200, { ...st, restarting: true });
+      onUpdate();
+      return;
     }
 
     // ── 지식 DB ──

@@ -10,6 +10,7 @@ import { log, setLogDir, setRedactor } from "./log.ts";
 import { naverSources } from "./naver/sources.ts";
 import { processDrafts } from "./pipeline.ts";
 import { createHubServer } from "./server.ts";
+import { Updater } from "./updater.ts";
 import type { InquirySource } from "./source.ts";
 
 function coupangKeyWarning(issuedAt: string | null) {
@@ -62,7 +63,16 @@ async function main() {
 
   // 화면 제공
   const webDir = resolve(import.meta.dirname, "../../web/dist");
-  const server = createHubServer({ db, webDir, backup: () => db.backup(cfg.backupDir) });
+  const updater = new Updater(resolve(import.meta.dirname, "../../.."), join(cfg.dataDir, "update-requested"));
+  const restartForUpdate = (why: string) => {
+    log.info(`새 버전으로 업데이트합니다 (${why}). 잠시 후 자동으로 다시 켜집니다.`);
+    server.close();
+    updater.requestRestartForUpdate(() => {
+      db.close();
+      process.exit(0);
+    });
+  };
+  const server = createHubServer({ db, webDir, backup: () => db.backup(cfg.backupDir), updater, onUpdate: () => restartForUpdate("관리자 요청") });
   server.listen(cfg.port, "0.0.0.0", () => {
     log.info("──────────────────────────────────────────────");
     log.info("DRC CS 허브가 켜졌습니다.");
@@ -91,6 +101,27 @@ async function main() {
   await run();
   cron.schedule("* * * * *", run, { timezone: "Asia/Seoul" });
   cron.schedule("0 9 * * *", () => coupangKeyWarning(cfg.coupang?.keyIssuedAt ?? null), { timezone: "Asia/Seoul" });
+  // 평일 08:40 새 버전 확인 → 있으면 업무 시작 전에 자동 업데이트 (git 설치형만)
+  if (updater.installedWithGit) {
+    log.info("자동 업데이트: 켜짐 (평일 08:40 확인)");
+    cron.schedule(
+      "40 8 * * 1-5",
+      async () => {
+        const st = await updater.check();
+        if (st.error) log.warn(`업데이트 확인 실패: ${st.error}`);
+        else if (st.hasUpdate) {
+          try {
+            db.backup(cfg.backupDir);
+          } catch {
+            /* 백업 실패해도 업데이트는 진행 */
+          }
+          restartForUpdate(`${st.current} → ${st.latest}`);
+        }
+      },
+      { timezone: "Asia/Seoul" },
+    );
+  } else log.info("자동 업데이트: 꺼짐 (ZIP으로 설치됨 — 6-auto-update-setup.bat 로 켤 수 있음)");
+
   // 매일 18:10 데이터 백업 (30개 보관)
   cron.schedule(
     "10 18 * * *",
