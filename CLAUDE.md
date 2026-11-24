@@ -21,7 +21,7 @@
 - `apps/web` Vite + React + Tailwind 화면. 허브가 `apps/web/dist`를 그대로 제공. 마켓 API를 직접 부르지 않음.
 - `packages/shared` 공통 타입, 운영시간 엔진, 공휴일 목록, 개인정보 마스킹. (Phase 2: 규칙 `rules.yaml`, 금지표현)
 - 사용자는 bat 파일만 씀: `1-install.bat`(npx pnpm install) · `2-start.bat`(웹 빌드+허브 실행) · `3-settings.bat`(설정 메모장) · `4-check.bat`(연결 점검). 자동 시작은 시작프로그램 폴더 바로가기.
-- 네이버 엔드포인트 파라미터는 미확인 → `apps/hub/src/naver/sources.ts`의 `NAVER_ENDPOINTS`만 고치면 됨. `4-check.bat` 결과(probe-결과.txt)로 확정.
+- 네이버 문의 2종 엔드포인트·파라미터·응답 필드는 2026-11-24 실측으로 확정 (`docs/api-notes.md` 12장). 쿠팡은 연동정보가 사방넷으로 되어 있어 IP 미등록 — 사방넷 확인 대기, **쿠팡 키 재발급·연동정보 임의 수정 금지**.
 
 ## 명령
 - 테스트: `pnpm test` · 타입 검사: `pnpm typecheck` · 허브 실행: `pnpm hub` (웹 빌드 포함)

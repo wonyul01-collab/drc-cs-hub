@@ -47,6 +47,12 @@ export default function InquiryDetail() {
           )}
           <dt className="font-semibold text-gray-600">상품</dt>
           <dd>{row.product_name ?? row.product_id ?? "-"}</dd>
+          {row.meta?.option && (
+            <>
+              <dt className="font-semibold text-gray-600">주문 옵션</dt>
+              <dd>{row.meta.option}</dd>
+            </>
+          )}
           <dt className="font-semibold text-gray-600">주문번호</dt>
           <dd>{row.order_id ?? "-"}</dd>
           <dt className="font-semibold text-gray-600">고객</dt>

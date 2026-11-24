@@ -127,7 +127,11 @@ export function mapNaverOrderInquiry(item: Obj, nowIso: string): InquiryUpsert |
     platform_answer: answer ? maskPii(answer).text : null,
     platform_status: pick<string>(item, "category", "inquiryCategory") ?? null,
     can_reply: true,
-    meta: { category: pick(item, "category", "inquiryCategory") ?? null },
+    meta: {
+      category: pick(item, "category", "inquiryCategory") ?? null,
+      // 주문 옵션 (예: "사이즈: L") — 답변할 때 참고
+      option: maskPii(pick<string>(item, "productOrderOption") ?? "").text || null,
+    },
     last_seen_at: nowIso,
   };
 }

@@ -147,3 +147,7 @@
 | 상품문의 `GET /v1/contents/qnas` | 200. 응답 `{contents[], page(1부터), size, totalElements, totalPages, sort, first, last}`. **size=100 요청에도 size=10으로 응답** → 10건씩 페이지 넘김 필요(반영). fromDate/toDate 인식 여부는 문의가 0건이라 미확정 |
 | 주문 문의 `GET /v1/pay-user/inquiries` | 200. Spring 페이지 형식 `{content[], pageable{pageNumber(0부터), pageSize:100}, totalElements, totalPages, last}`. page=1 → pageNumber 0 (1부터 세는 방식), size=100 인식, startSearchDate/endSearchDate(YYYY-MM-DD) 오류 없음 |
 | 쿠팡 | 403 "Your ip address … is not allowed" — 연동정보가 사방넷으로 설정되어 있어 사무실 IP 미등록. 사방넷 확인 대기 |
+
+### 12-1. 실측 2차 (2026-11-24, 올바른 스토어 애플리케이션 키로 교체 후) — ✅ 확정
+- 상품문의: 29일 2건 조회. 응답 항목 `questionId, question, answer, answers[], answered, createDate, productId, productName, maskedWriterId` — 프로그램 매핑과 일치. size=100 정상 인식(1차의 size=10은 다른 애플리케이션 키 영향으로 보임). fromDate/toDate(ISO) 정상.
+- 주문 문의: 29일 2건. 항목 `inquiryNo, category, title, inquiryContent, inquiryRegistrationDateTime, answerContentId, answerContent, answerTemplateNo, answerRegistrationDateTime, answered, orderId, productNo, productOrderIdList, productName, productOrderOption, customerId, customerName` — 매핑 일치. customerId는 저장하지 않음, customerName은 마스킹, productOrderOption은 meta.option으로 저장.

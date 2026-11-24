@@ -23,6 +23,7 @@ export interface InquiryRow {
   platform_status: string | null;
   can_reply: boolean;
   status: InquiryStatus;
+  meta?: { option?: string | null; category?: string | null };
 }
 
 const PAGE = 30;

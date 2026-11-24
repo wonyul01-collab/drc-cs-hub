@@ -55,8 +55,12 @@ describe("네이버 응답 → 문의 변환", () => {
   });
 
   it("주문 문의: 고객 이름 마스킹", () => {
-    const r = mapNaverOrderInquiry({ inquiryNo: 55, title: "교환", inquiryContent: "사이즈 교환", customerName: "홍길동", answered: true, answerContent: "확인했습니다" }, NOW)!;
+    // 2026-11-24 실측 응답 필드 그대로
+    const r = mapNaverOrderInquiry({ inquiryNo: 55, category: "교환", title: "교환", inquiryContent: "사이즈 교환", inquiryRegistrationDateTime: "2026-11-20T14:00:00.000+09:00", customerId: "abc123", customerName: "홍길동", answered: true, answerContent: "확인했습니다", orderId: "2026112012345", productNo: "777", productName: "요실금팬티", productOrderOption: "사이즈: L" }, NOW)!;
     expect(r.customer_masked).toBe("홍*동");
+    expect(r.received_at).toBe("2026-11-20T05:00:00.000Z");
+    expect(r.meta).toMatchObject({ category: "교환", option: "사이즈: L" });
+    expect(JSON.stringify(r)).not.toContain("abc123"); // 고객 아이디는 저장 안 함
     expect(r.platform_answered).toBe(true);
   });
 });
