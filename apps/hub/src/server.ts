@@ -4,10 +4,11 @@ import { extname, join, normalize, resolve, sep } from "node:path";
 import { seoulParts, type Role } from "@drc/shared";
 import type { HubDb, User } from "./db.ts";
 import { exportKnowledgeXlsx, parseKnowledgeXlsx } from "./excel.ts";
-import { checkEdited, processDrafts } from "./pipeline.ts";
+import { checkEdited, processDrafts, processReviewDrafts } from "./pipeline.ts";
+import { parseReviewXlsx } from "./reviewImport.ts";
 import type { Updater } from "./updater.ts";
 import type { Notifier } from "./notify.ts";
-import { checkFixedText, checkForbidden, MAX_REPLY_LENGTH } from "@drc/shared";
+import { checkFixedText, checkForbidden, identifyProducts, MAX_REPLY_LENGTH } from "@drc/shared";
 
 /**
  * 화면 제공 + 데이터 API (메인 PC에서 실행, 같은 사무실 PC는 http://메인PC주소:3000 으로 접속)
@@ -321,6 +322,56 @@ export function createHubServer({ db, webDir, backup, updater, onUpdate, dryRun 
         return send(res, 200, { ok: true });
       }
       throw new HttpError(400, "알 수 없는 처리입니다.");
+    }
+
+    // ── 리뷰 (모든 담당자) ──
+    if (path === "/api/reviews/import" && method === "POST") {
+      const b = await readJson(req, 30_000_000);
+      const file = typeof b.file === "string" ? Buffer.from(b.file, "base64") : null;
+      if (!file?.length) throw new HttpError(400, "파일이 비어 있습니다.");
+      const hint = b.channel === "coupang" || b.channel === "smartstore" ? b.channel : undefined;
+      const parsed = await parseReviewXlsx(file, hint);
+      if (parsed.errors.length) return send(res, 400, { error: "리뷰 엑셀을 읽지 못했습니다.", details: parsed.errors });
+      const products = db.productInfos();
+      const result = db.upsertReviews(parsed.rows, (name) => identifyProducts("", name, products)[0] ?? null);
+      db.recordReviewFile(parsed.channel!, String(b.filename ?? "").slice(0, 120), me.name, parsed.rows.length, result.inserted, result.autoDone);
+      const drafted = processReviewDrafts(db);
+      await db.audit("reviews.import", { channel: parsed.channel, total: parsed.rows.length, ...result }, me.login);
+      return send(res, 200, { channel: parsed.channel, total: parsed.rows.length, ...result, drafted, counts: db.reviewCounts() });
+    }
+    if (path === "/api/reviews" && method === "GET") {
+      const p = url.searchParams;
+      return send(res, 200, {
+        ...db.listReviews({ tab: p.get("tab") ?? "todo", q: p.get("q") || undefined, page: Number(p.get("page") ?? 1) || 1, channel: p.get("channel") || undefined }),
+        counts: db.reviewCounts(),
+        files: db.lastReviewFiles(3),
+        reminder: !!db.getSetting<boolean>("review_reminder"),
+      });
+    }
+    if (path === "/api/reviews/reminder" && method === "POST") {
+      requireAdmin();
+      const b = await readJson(req);
+      db.setSetting("review_reminder", !!b.on);
+      return send(res, 200, { ok: true, reminder: !!b.on });
+    }
+    const rv = /^\/api\/reviews\/(\d+)\/(draft|redraft|done|undo)$/.exec(path);
+    if (rv && method === "POST") {
+      const id = Number(rv[1]);
+      if (rv[2] === "draft") {
+        const b = await readJson(req);
+        const text = str(b.text, "답글", 2, 3000);
+        const problems = [...checkForbidden(text).map((f) => `쓰면 안 되는 표현: ${f.label} ("${f.match}")`), ...checkFixedText(text)];
+        if (!db.editReviewDraft(id, text, me.name)) throw new HttpError(409, "이미 처리된 리뷰입니다.");
+        return send(res, 200, { ok: true, warnings: problems });
+      }
+      if (rv[2] === "redraft") {
+        db.resetReviewDraft(id);
+        processReviewDrafts(db);
+        return send(res, 200, { ok: true });
+      }
+      if (!db.setReviewDone(id, rv[2] === "done", me.name)) throw new HttpError(409, "이미 처리 상태가 바뀌었습니다. 새로고침 해주세요.");
+      await db.audit(rv[2] === "done" ? "review.done" : "review.undo", { id }, me.login);
+      return send(res, 200, { ok: true });
     }
 
     // ── 알림 (관리자) ──

@@ -6,6 +6,7 @@ import Holidays from "./pages/Holidays.tsx";
 import Home from "./pages/Home.tsx";
 import Inquiries from "./pages/Inquiries.tsx";
 import Knowledge from "./pages/Knowledge.tsx";
+import Reviews from "./pages/Reviews.tsx";
 import InquiryDetail from "./pages/InquiryDetail.tsx";
 import Login from "./pages/Login.tsx";
 import Setup from "./pages/Setup.tsx";
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/inquiries" element={<Inquiries />} />
           <Route path="/inquiries/:id" element={<InquiryDetail />} />
+          <Route path="/reviews" element={<Reviews />} />
           <Route path="/knowledge" element={<Knowledge />} />
           <Route path="/holidays" element={<Holidays />} />
           <Route path="/users" element={<Users />} />

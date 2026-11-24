@@ -11,6 +11,8 @@ interface Counts {
   today: number;
   routeAuto: number;
   approved: number;
+  reviewsTodo: number;
+  reviewsCaution: number;
   routeApprove: number;
   routeHuman: number;
 }
@@ -179,6 +181,7 @@ export default function Home() {
     { label: "처리할 신규 문의", value: counts.newTotal, to: "/inquiries?status=new", tone: "text-blue-700" },
     { label: "기한 임박 (4시간 이내)", value: counts.dueSoon, to: "/inquiries?status=new&sort=deadline", tone: counts.dueSoon ? "text-red-600" : "text-gray-800" },
     { label: "개인정보 포함 (직접 확인)", value: counts.pii, to: "/inquiries?status=new&pii=1", tone: counts.pii ? "text-amber-700" : "text-gray-800" },
+    { label: `답글 대기 리뷰 (주의 ${counts.reviewsCaution})`, value: counts.reviewsTodo, to: "/reviews", tone: counts.reviewsCaution ? "text-red-600" : "text-gray-800" },
     { label: "승인됨 · 판매자센터 등록 대기", value: counts.approved, to: "/inquiries?status=approved", tone: counts.approved ? "text-green-700" : "text-gray-800" },
   ];
   const routeTiles = [
@@ -248,7 +251,7 @@ export default function Home() {
         <p className="mt-2 text-gray-700">아래 경로는 API가 없어 이 화면에 모이지 않습니다.</p>
         <ul className="mt-2 list-disc pl-6">
           <li>스마트스토어 「고객센터 문의 관리」, 톡톡 상담</li>
-          <li>스마트스토어·쿠팡 리뷰 (Phase 4에서 파일 업로드로 연결 예정)</li>
+          <li>리뷰는 [리뷰] 메뉴에서 판매자센터 리뷰 엑셀을 올리면 답글 초안이 만들어집니다</li>
         </ul>
       </Card>
     </div>

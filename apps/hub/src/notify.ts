@@ -130,7 +130,7 @@ export function planNotifications(db: HubDb, ctx: PlanContext): number {
       "morning",
       all,
       "휴일 동안 들어온 문의 요약",
-      `휴일 이후 처리할 문의는 ${c.pending}건입니다 (③ 사람 전용 ${c.pendingHuman}건).\n▶ 확인하기: ${url("/inquiries?status=new&sort=deadline")}`,
+      `휴일 이후 처리할 문의는 ${c.pending}건입니다 (③ 사람 전용 ${c.pendingHuman}건). 답글 대기 리뷰 ${c.reviewsTodo}건.\n▶ 확인하기: ${url("/inquiries?status=new&sort=deadline")}`,
     );
   }
 
@@ -155,6 +155,21 @@ export function planNotifications(db: HubDb, ctx: PlanContext): number {
       `오늘 처리 현황 (${p.date})`,
       `오늘 들어온 문의 ${t.received}건 · 승인 ${t.approved}건 · 직접 처리 완료 ${t.closed}건\n남은 문의 ${c.pending}건\n▶ 확인하기: ${url("/")}`,
     );
+  }
+
+  // 5-1) 리뷰 파일 올리기 알림 — 하루 4번 (켜 둔 경우만)
+  if (db.getSetting<boolean>("review_reminder")) {
+    const rc = db.reviewCounts();
+    for (const [slot, label] of [[570, "09:30"], [690, "11:30"], [840, "14:00"], [990, "16:30"]] as const) {
+      if (p.minutes >= slot && p.minutes < slot + 60)
+        add(
+          `review-remind-${p.date}-${label}`,
+          "review_reminder",
+          all,
+          `리뷰 파일 올릴 시간입니다 (${label})`,
+          `스마트스토어센터·쿠팡 Wing에서 리뷰 엑셀을 내려받아 허브 [리뷰] 메뉴에 올려주세요.\n지금 답글 대기 리뷰 ${rc.todo}건 (주의 리뷰 ${rc.caution}건)\n▶ ${url("/reviews")}`,
+        );
+    }
   }
 
   // 6) 관리자: 수집 실패 (수집원별 하루 1번)

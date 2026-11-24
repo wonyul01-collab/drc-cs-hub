@@ -184,6 +184,32 @@ create table if not exists notifications (
   sent_at text
 );
 create index if not exists notifications_status_idx on notifications (status);
+create table if not exists reviews (
+  id integer primary key autoincrement,
+  channel text not null,
+  review_key text not null,
+  product_id text, product_name text, product text,
+  rating integer, review_type text,
+  body_masked text not null, prev_body_masked text,
+  has_photo integer not null default 0,
+  author_masked text, written_at text,
+  platform_replied integer not null default 0,
+  hidden integer not null default 0,
+  caution integer not null default 0,
+  caution_reasons text not null default '[]',
+  draft_text text, draft_templates text not null default '[]', draft_edited_by text,
+  status text not null default 'new',
+  done_by text, done_at text,
+  first_seen_at text not null, last_seen_at text not null,
+  unique (channel, review_key)
+);
+create index if not exists reviews_status_idx on reviews (status, caution, written_at);
+create table if not exists review_files (
+  id integer primary key autoincrement,
+  channel text not null, filename text, uploaded_by text,
+  uploaded_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  total integer, inserted integer, auto_done integer
+);
 create table if not exists audit_log (
   id integer primary key autoincrement,
   at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
@@ -476,6 +502,8 @@ export class HubDb implements Store {
       routeAuto: n("select count(*) n from inquiries where status = 'new' and approved_at is null and route = 'auto'"),
       routeApprove: n("select count(*) n from inquiries where status = 'new' and approved_at is null and route = 'approve'"),
       routeHuman: n("select count(*) n from inquiries where status = 'new' and approved_at is null and route = 'human'"),
+      reviewsTodo: n("select count(*) n from reviews where status = 'new'"),
+      reviewsCaution: n("select count(*) n from reviews where status = 'new' and caution = 1"),
       runs: runs.map((r) => ({ ...r, ok: !!r.ok })),
     };
   }
@@ -793,6 +821,7 @@ export class HubDb implements Store {
       pending: n("select count(*) n from inquiries where status = 'new' and approved_at is null"),
       pendingHuman: n("select count(*) n from inquiries where status = 'new' and approved_at is null and route = 'human'"),
       approvedWaiting: n("select count(*) n from inquiries where status = 'new' and approved_at is not null"),
+      reviewsTodo: n("select count(*) n from reviews where status = 'new'"),
     };
   }
 
@@ -809,6 +838,125 @@ export class HubDb implements Store {
       received: n("select count(*) n from inquiries where first_seen_at >= ?"),
       approved: n("select count(*) n from approvals where action in ('approve','approve_edited') and at >= ?"),
       closed: n("select count(*) n from approvals where action = 'close' and at >= ?"),
+    };
+  }
+
+  // ───────── 리뷰 ─────────
+  /**
+   * 리뷰 엑셀 저장: 리뷰 번호로 중복 제거. 판매자센터에 답글이 달린 리뷰는 자동 '완료'(replied_on_platform),
+   * 블라인드는 'hidden'. 담당자 수정 초안·처리 상태는 유지.
+   */
+  upsertReviews(
+    rows: import("./reviewImport.ts").ReviewRow[],
+    product: (name: string | null) => string | null,
+  ): { inserted: number; autoDone: number } {
+    const now = new Date().toISOString();
+    const exists = this.db.prepare("select id, status from reviews where channel = ? and review_key = ?");
+    const ins = this.db.prepare(`insert into reviews (channel, review_key, product_id, product_name, product, rating, review_type, body_masked, prev_body_masked,
+      has_photo, author_masked, written_at, platform_replied, hidden, status, first_seen_at, last_seen_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const upd = this.db.prepare(`update reviews set rating = ?, body_masked = ?, prev_body_masked = ?, has_photo = ?, platform_replied = ?, hidden = ?, last_seen_at = ?,
+      status = case when status = 'new' and ? = 1 then 'replied_on_platform' when status = 'new' and ? = 1 then 'hidden' else status end where id = ?`);
+    return this.tx(() => {
+      let inserted = 0;
+      let autoDone = 0;
+      for (const r of rows) {
+        const cur = exists.get(r.channel, r.review_key) as Row | undefined;
+        const status = r.platform_replied ? "replied_on_platform" : r.hidden ? "hidden" : "new";
+        if (!cur) {
+          ins.run(r.channel, r.review_key, r.product_id, r.product_name, product(r.product_name), r.rating, r.review_type, r.body_masked, r.prev_body_masked,
+            r.has_photo ? 1 : 0, r.author_masked, r.written_at, r.platform_replied ? 1 : 0, r.hidden ? 1 : 0, status, now, now);
+          inserted++;
+        } else {
+          if (cur.status === "new" && r.platform_replied) autoDone++;
+          upd.run(r.rating, r.body_masked, r.prev_body_masked, r.has_photo ? 1 : 0, r.platform_replied ? 1 : 0, r.hidden ? 1 : 0, now, r.platform_replied ? 1 : 0, r.hidden ? 1 : 0, Number(cur.id));
+        }
+      }
+      return { inserted, autoDone };
+    });
+  }
+
+  recordReviewFile(channel: string, filename: string, by: string, total: number, inserted: number, autoDone: number) {
+    this.db.prepare("insert into review_files (channel, filename, uploaded_by, total, inserted, auto_done) values (?,?,?,?,?,?)").run(channel, filename, by, total, inserted, autoDone);
+  }
+
+  lastReviewFiles(limit = 5) {
+    return this.db.prepare("select * from review_files order by id desc limit ?").all(limit);
+  }
+
+  /** 초안이 아직 없는 처리 대기 리뷰 (오래된 것부터 → 같은 상품 문장 반복 방지가 순서대로 적용) */
+  reviewsNeedingDraft(): Array<{ id: number; review_key: string; body_masked: string; rating: number | null; review_type: string | null; has_photo: boolean; product: string | null }> {
+    return (this.db.prepare("select * from reviews where status = 'new' and draft_text is null order by written_at, id").all() as Row[]).map((r) => ({
+      id: Number(r.id),
+      review_key: String(r.review_key),
+      body_masked: String(r.body_masked),
+      rating: r.rating === null ? null : Number(r.rating),
+      review_type: (r.review_type as string) ?? null,
+      has_photo: !!r.has_photo,
+      product: (r.product as string) ?? null,
+    }));
+  }
+
+  /** 같은 상품에 최근 쓴 문장 id (반복 방지) */
+  recentReviewTemplates(product: string | null, limit = 8): string[] {
+    const rows = this.db
+      .prepare("select draft_templates from reviews where draft_text is not null and coalesce(product, '') = coalesce(?, '') order by id desc limit ?")
+      .all(product, limit) as Row[];
+    return rows.flatMap((r) => JSON.parse(String(r.draft_templates)) as string[]);
+  }
+
+  saveReviewDraft(id: number, text: string, templates: string[], caution: boolean, reasons: string[]) {
+    this.db
+      .prepare("update reviews set draft_text = ?, draft_templates = ?, caution = ?, caution_reasons = ? where id = ?")
+      .run(text, JSON.stringify(templates), caution ? 1 : 0, JSON.stringify(reasons), id);
+  }
+
+  editReviewDraft(id: number, text: string, actor: string): boolean {
+    return Number(this.db.prepare("update reviews set draft_text = ?, draft_edited_by = ? where id = ? and status = 'new'").run(text, actor, id).changes) > 0;
+  }
+
+  resetReviewDraft(id: number) {
+    this.db.prepare("update reviews set draft_text = null, draft_edited_by = null, draft_templates = '[]' where id = ?").run(id);
+  }
+
+  setReviewDone(id: number, done: boolean, actor: string): boolean {
+    const r = done
+      ? this.db.prepare("update reviews set status = 'done', done_by = ?, done_at = ? where id = ? and status = 'new'").run(actor, new Date().toISOString(), id)
+      : this.db.prepare("update reviews set status = 'new', done_by = null, done_at = null where id = ? and status = 'done'").run(id);
+    return Number(r.changes) > 0;
+  }
+
+  listReviews(f: { tab?: string; q?: string; page?: number; channel?: string }) {
+    const where: string[] = [];
+    const args: Array<string | number> = [];
+    if (f.tab === "todo" || !f.tab) where.push("status = 'new'");
+    else if (f.tab === "caution") where.push("status = 'new' and caution = 1");
+    else if (f.tab === "done") where.push("status in ('done','replied_on_platform')");
+    if (f.channel) (where.push("channel = ?"), args.push(f.channel));
+    if (f.q) {
+      where.push("(body_masked like ? or product_name like ?)");
+      const like = `%${f.q.replace(/[%_]/g, "")}%`;
+      args.push(like, like);
+    }
+    const w = where.length ? `where ${where.join(" and ")}` : "";
+    const page = Math.max(1, f.page ?? 1);
+    const total = Number((this.db.prepare(`select count(*) n from reviews ${w}`).get(...args) as Row).n);
+    const rows = (this.db
+      .prepare(`select * from reviews ${w} order by case when status = 'new' then 0 else 1 end, caution desc, written_at desc limit 30 offset ?`)
+      .all(...args, (page - 1) * 30) as Row[]).map((r) => ({
+      ...r,
+      has_photo: !!r.has_photo,
+      caution: !!r.caution,
+      platform_replied: !!r.platform_replied,
+      caution_reasons: JSON.parse(String(r.caution_reasons)),
+    }));
+    return { rows, total };
+  }
+
+  reviewCounts() {
+    const n = (sql: string) => Number((this.db.prepare(sql).get() as Row).n);
+    return {
+      todo: n("select count(*) n from reviews where status = 'new'"),
+      caution: n("select count(*) n from reviews where status = 'new' and caution = 1"),
     };
   }
 

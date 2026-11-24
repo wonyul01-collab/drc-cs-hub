@@ -151,3 +151,8 @@
 ### 12-1. 실측 2차 (2026-11-24, 올바른 스토어 애플리케이션 키로 교체 후) — ✅ 확정
 - 상품문의: 29일 2건 조회. 응답 항목 `questionId, question, answer, answers[], answered, createDate, productId, productName, maskedWriterId` — 프로그램 매핑과 일치. size=100 정상 인식(1차의 size=10은 다른 애플리케이션 키 영향으로 보임). fromDate/toDate(ISO) 정상.
 - 주문 문의: 29일 2건. 항목 `inquiryNo, category, title, inquiryContent, inquiryRegistrationDateTime, answerContentId, answerContent, answerTemplateNo, answerRegistrationDateTime, answered, orderId, productNo, productOrderIdList, productName, productOrderOption, customerId, customerName` — 매핑 일치. customerId는 저장하지 않음, customerName은 마스킹, productOrderOption은 meta.option으로 저장.
+
+## 13. 스마트스토어센터 리뷰 엑셀 (실물 확인 2026-11-25, `review_YYYYMMDD_HHMMSS.xlsx`)
+- 시트 1개(Sheet0), 1행 제목. 칸: 상품번호, 상품명, 리뷰구분(일반/한달사용), 구매자평점(1~5), 포토/영상(URL), 리뷰상세내용, 리뷰도움수, 등록자(가려진 아이디), 리뷰등록일(`2026.11.22. 19:00:16`), 최종수정일, **리뷰글번호(고유값)**, 관련리뷰글번호, 관련리뷰상세내용(한달사용의 이전 리뷰), 전시상태(정상/블라인드), **답글여부(Y/N)**, 답글등록일시, 베스트리뷰, 베스트리뷰선정일시, 이벤트번호, 혜택지급, 혜택지급일시, 유저정보 등록 항목, 상품주문번호, 풀필먼트사, 리뷰이동일
+- **답글 내용은 엑셀에 없음** (답글여부·등록일시만) → 기존 답글 문장 학습은 불가, 완료 여부 판단에만 사용
+- 표본: 338건 중 답글 N 49건, 별점 3점 이하 9건, 블라인드 2건, 한달사용 44건, 포토 161건

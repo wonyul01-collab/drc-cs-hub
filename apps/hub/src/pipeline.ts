@@ -1,4 +1,4 @@
-import { checkFixedText, checkForbidden, makeDraft, type Channel } from "@drc/shared";
+import { checkFixedText, checkForbidden, makeDraft, makeReviewDraft, type Channel } from "@drc/shared";
 import type { HubDb } from "./db.ts";
 import { log } from "./log.ts";
 
@@ -29,4 +29,22 @@ export function processDrafts(db: HubDb, limit = 200): number {
 /** 담당자가 고친 문장 검사 */
 export function checkEdited(text: string) {
   return { forbidden: checkForbidden(text), warnings: checkFixedText(text) };
+}
+
+/** 초안이 없는 리뷰에 답글 초안 만들기 (같은 상품에 최근 쓴 문장은 피함) */
+export function processReviewDrafts(db: HubDb): number {
+  const list = db.reviewsNeedingDraft();
+  for (const r of list) {
+    const d = makeReviewDraft({
+      key: r.review_key,
+      text: r.body_masked,
+      rating: r.rating,
+      reviewType: r.review_type,
+      hasPhoto: r.has_photo,
+      recentTemplateIds: db.recentReviewTemplates(r.product),
+    });
+    db.saveReviewDraft(r.id, d.text, d.templateIds, d.analysis.caution, d.analysis.cautionReasons);
+  }
+  if (list.length) log.info(`리뷰 답글 초안 ${list.length}건 만들었습니다.`);
+  return list.length;
 }
