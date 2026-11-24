@@ -9,6 +9,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const links = [
     { to: "/", label: "홈" },
     { to: "/inquiries", label: "통합 창구" },
+    { to: "/knowledge", label: "지식 DB" },
     { to: "/holidays", label: "휴무일" },
     ...(user?.role === "admin" ? [{ to: "/users", label: "담당자" }] : []),
   ];

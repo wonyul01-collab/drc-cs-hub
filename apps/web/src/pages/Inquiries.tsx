@@ -1,7 +1,7 @@
-import { CHANNEL_LABEL, KIND_LABEL, STATUS_LABEL, type Channel, type InquiryKind, type InquiryStatus } from "@drc/shared";
+import { CHANNEL_LABEL, KIND_LABEL, ROUTE_LABEL, STATUS_LABEL, type Channel, type InquiryKind, type InquiryStatus } from "@drc/shared";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Badge, ChannelBadge, ErrorBox, KindBadge, StatusBadge } from "../components/ui.tsx";
+import { Badge, ChannelBadge, ErrorBox, KindBadge, RouteBadge, StatusBadge } from "../components/ui.tsx";
 import { api, fmtDateTime, fmtRemaining } from "../lib.ts";
 
 export interface InquiryRow {
@@ -23,6 +23,7 @@ export interface InquiryRow {
   platform_status: string | null;
   can_reply: boolean;
   status: InquiryStatus;
+  route?: "auto" | "approve" | "human" | null;
   meta?: { option?: string | null; category?: string | null };
 }
 
@@ -33,6 +34,7 @@ export default function Inquiries() {
   const channel = sp.get("channel") ?? "";
   const kind = sp.get("kind") ?? "";
   const status = sp.get("status") ?? "";
+  const route = sp.get("route") ?? "";
   const sort = sp.get("sort") ?? "received";
   const pii = sp.get("pii") === "1";
   const q = sp.get("q") ?? "";
@@ -52,7 +54,7 @@ export default function Inquiries() {
   };
 
   useEffect(() => {
-    const p = new URLSearchParams({ channel, kind, status, sort, q, page: String(page), pii: pii ? "1" : "" });
+    const p = new URLSearchParams({ channel, kind, status, route, sort, q, page: String(page), pii: pii ? "1" : "" });
     api<{ rows: InquiryRow[]; total: number }>(`/api/inquiries?${p}`)
       .then((r) => {
         setErr(null);
@@ -60,7 +62,7 @@ export default function Inquiries() {
         setTotal(r.total);
       })
       .catch((e) => setErr(`불러오기 실패: ${e.message}`));
-  }, [channel, kind, status, sort, pii, q, page]);
+  }, [channel, kind, status, route, sort, pii, q, page]);
 
   const select = "min-w-0 grow basis-36 rounded-lg border-2 border-gray-300 bg-white px-3 py-2";
   const pages = Math.max(1, Math.ceil(total / PAGE));
@@ -85,6 +87,12 @@ export default function Inquiries() {
         <select aria-label="상태" className={select} value={status} onChange={(e) => set("status", e.target.value)}>
           <option value="">전체 상태</option>
           {Object.entries(STATUS_LABEL).map(([k, v]) => (
+            <option key={k} value={k}>{v}</option>
+          ))}
+        </select>
+        <select aria-label="처리 단계" className={select} value={route} onChange={(e) => set("route", e.target.value)}>
+          <option value="">전체 처리 단계</option>
+          {Object.entries(ROUTE_LABEL).map(([k, v]) => (
             <option key={k} value={k}>{v}</option>
           ))}
         </select>
@@ -126,6 +134,7 @@ export default function Inquiries() {
                     <ChannelBadge c={r.channel} />
                     <KindBadge k={r.kind} />
                     <StatusBadge s={r.status} />
+                    {r.status === "new" && <RouteBadge r={r.route} />}
                     {r.pii_detected && <Badge tone="amber">개인정보 포함</Badge>}
                     {!r.can_reply && r.status === "new" && <Badge>답변 불가 상태</Badge>}
                     {rem && <Badge tone={rem.level === "ok" ? "gray" : rem.level === "warn" ? "amber" : "red"}>⏰ {rem.text}</Badge>}

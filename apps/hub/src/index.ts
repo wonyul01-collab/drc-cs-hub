@@ -7,6 +7,7 @@ import { HubDb } from "./db.ts";
 import { Engine } from "./engine.ts";
 import { log, setLogDir, setRedactor } from "./log.ts";
 import { naverSources } from "./naver/sources.ts";
+import { processDrafts } from "./pipeline.ts";
 import { createHubServer } from "./server.ts";
 import type { InquirySource } from "./source.ts";
 
@@ -41,11 +42,11 @@ async function main() {
   if (cfg.coupang) sources.push(...coupangSources(cfg.coupang));
   else log.warn("쿠팡 키가 없어 쿠팡 수집을 건너뜁니다.");
 
-  const engine = new Engine({ store: db, sources, workerId: cfg.workerId, lookbackDays: cfg.lookbackDays, dataGoKrKey: cfg.dataGoKrKey });
+  const engine = new Engine({ store: db, sources, workerId: cfg.workerId, lookbackDays: cfg.lookbackDays, dataGoKrKey: cfg.dataGoKrKey, afterCollect: () => void processDrafts(db) });
 
   // 화면 제공
   const webDir = resolve(import.meta.dirname, "../../web/dist");
-  const server = createHubServer({ db, webDir });
+  const server = createHubServer({ db, webDir, backup: () => db.backup(cfg.backupDir) });
   server.listen(cfg.port, "0.0.0.0", () => {
     log.info("──────────────────────────────────────────────");
     log.info("DRC CS 허브가 켜졌습니다.");

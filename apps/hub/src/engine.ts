@@ -13,6 +13,8 @@ export interface EngineDeps {
   workerId: string;
   lookbackDays: number;
   dataGoKrKey: string | null;
+  /** 수집 직후 실행 (분류·초안 만들기) */
+  afterCollect?: () => void | Promise<void>;
 }
 
 /**
@@ -65,9 +67,14 @@ export class Engine {
       }
 
       const due = now.getTime() - this.lastCollectAt >= this.intervalMin * MIN;
-      if (due && this.d.sources.length) {
-        this.lastResults = await collectAll(this.d.sources, this.d.store, now, this.d.lookbackDays);
+      if (due) {
+        if (this.d.sources.length) this.lastResults = await collectAll(this.d.sources, this.d.store, now, this.d.lookbackDays);
         this.lastCollectAt = now.getTime();
+        try {
+          await this.d.afterCollect?.();
+        } catch (e) {
+          log.error("분류·초안 만들기 실패", e);
+        }
       }
       await this.d.store.heartbeat(this.d.workerId, "operating", {
         lastCollectAt: this.lastCollectAt ? new Date(this.lastCollectAt).toISOString() : null,

@@ -2,7 +2,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { DEFAULT_OPERATING, type InquiryUpsert, type OperatingConfig, type Role } from "@drc/shared";
+import { DEFAULT_OPERATING, type DraftResult, type InquiryUpsert, type KnowledgeEntry, type OperatingConfig, type ProductInfo, type Role, type Route } from "@drc/shared";
 
 /**
  * 데이터 보관 — 메인 PC 안의 파일 1개 (worker-data/drc-cs-hub.db, SQLite)
@@ -47,6 +47,7 @@ export interface InquiryFilter {
   channel?: string;
   kind?: string;
   status?: string;
+  route?: string;
   pii?: boolean;
   q?: string;
   sort?: "received" | "deadline";
@@ -110,6 +111,39 @@ create table if not exists collect_runs (
   ok integer, error text
 );
 create index if not exists collect_runs_lookup_idx on collect_runs (channel, kind, started_at desc);
+create table if not exists knowledge (
+  id integer primary key autoincrement,
+  active integer not null default 1,
+  category text not null default 'other',
+  title text not null,
+  products text not null default '[]',
+  keywords text not null default '[]',
+  example text,
+  answer text not null default '',
+  conditions text,
+  min_route text not null default 'auto' check (min_route in ('auto','approve','human')),
+  valid_until text,
+  updated_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_by text
+);
+create table if not exists products (
+  name text primary key,
+  aliases text not null default '[]',
+  absorb_ml text, features text, size_guide text, wash_guide text, caution text
+);
+create table if not exists drafts (
+  id integer primary key autoincrement,
+  inquiry_id integer not null references inquiries(id) on delete cascade,
+  text text not null,
+  route text not null,
+  category text,
+  confidence real,
+  knowledge_ids text not null default '[]',
+  detail text not null default '{}',
+  created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  created_by text not null default 'system'
+);
+create index if not exists drafts_inquiry_idx on drafts (inquiry_id, id desc);
 create table if not exists audit_log (
   id integer primary key autoincrement,
   at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
@@ -154,6 +188,16 @@ export class HubDb implements Store {
     this.db = new DatabaseSync(path);
     this.db.exec("pragma journal_mode = wal; pragma foreign_keys = on; pragma busy_timeout = 5000;");
     this.db.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /** 예전 데이터 파일에 새 칸 추가 (Phase 2) */
+  private migrate() {
+    const cols = new Set((this.db.prepare("pragma table_info(inquiries)").all() as Row[]).map((r) => String(r.name)));
+    if (!cols.has("route")) this.db.exec("alter table inquiries add column route text");
+    if (!cols.has("category")) this.db.exec("alter table inquiries add column category text");
+    if (!cols.has("drafted_at")) this.db.exec("alter table inquiries add column drafted_at text");
+    this.db.exec("create index if not exists inquiries_route_idx on inquiries (route)");
   }
 
   close() {
@@ -324,6 +368,7 @@ export class HubDb implements Store {
     if (f.channel) (where.push("channel = ?"), args.push(f.channel));
     if (f.kind) (where.push("kind = ?"), args.push(f.kind));
     if (f.status) (where.push("status = ?"), args.push(f.status));
+    if (f.route) (where.push("route = ?"), args.push(f.route));
     if (f.pii) where.push("pii_detected = 1");
     if (f.q) {
       where.push("(body_masked like ? or product_name like ? or title like ? or order_id like ?)");
@@ -358,6 +403,9 @@ export class HubDb implements Store {
       dueSoon: n("select count(*) n from inquiries where status = 'new' and can_reply = 1 and deadline_at is not null and deadline_at <= ?", soon),
       pii: n("select count(*) n from inquiries where status = 'new' and pii_detected = 1"),
       today: n("select count(*) n from inquiries where first_seen_at >= ?", todayStartIso),
+      routeAuto: n("select count(*) n from inquiries where status = 'new' and route = 'auto'"),
+      routeApprove: n("select count(*) n from inquiries where status = 'new' and route = 'approve'"),
+      routeHuman: n("select count(*) n from inquiries where status = 'new' and route = 'human'"),
       runs: runs.map((r) => ({ ...r, ok: !!r.ok })),
     };
   }
@@ -378,6 +426,145 @@ export class HubDb implements Store {
 
   deleteCompanyHoliday(date: string): boolean {
     return Number(this.db.prepare("delete from holidays where date = ? and source = 'company'").run(date).changes) > 0;
+  }
+
+  // ───────── 지식 DB·상품 ─────────
+  knowledgeEntries(onlyActive = true): KnowledgeEntry[] {
+    const rows = this.db.prepare(`select * from knowledge ${onlyActive ? "where active = 1" : ""} order by id`).all() as Row[];
+    return rows.map((r) => ({
+      id: Number(r.id),
+      title: String(r.title),
+      category: String(r.category),
+      products: JSON.parse(String(r.products)),
+      keywords: JSON.parse(String(r.keywords)),
+      answer: String(r.answer),
+      conditions: (r.conditions as string) ?? null,
+      minRoute: r.min_route as Route,
+      active: !!r.active,
+      validUntil: (r.valid_until as string) ?? null,
+    }));
+  }
+
+  listKnowledge(): Array<Record<string, unknown> & { id: number; title: string; conditions: string | null; products: string[]; keywords: string[]; active: boolean }> {
+    return (this.db.prepare("select * from knowledge order by id").all() as Row[]).map((r) => ({
+      id: Number(r.id),
+      title: String(r.title),
+      conditions: (r.conditions as string) ?? null,
+      ...r,
+      active: !!r.active,
+      products: JSON.parse(String(r.products)),
+      keywords: JSON.parse(String(r.keywords)),
+    }));
+  }
+
+  productInfos(): ProductInfo[] {
+    return (this.db.prepare("select name, aliases from products").all() as Row[]).map((r) => ({
+      name: String(r.name),
+      aliases: JSON.parse(String(r.aliases)),
+    }));
+  }
+
+  listProducts(): Array<Record<string, unknown> & { name: string; aliases: string[] }> {
+    return (this.db.prepare("select * from products order by name").all() as Row[]).map((r) => ({ ...r, name: String(r.name), aliases: JSON.parse(String(r.aliases)) }));
+  }
+
+  /** 엑셀 올리기: 지식 DB·상품 정보를 통째로 바꾼다 (바꾸기 전 자동 백업은 호출하는 쪽에서) */
+  replaceKnowledge(
+    entries: Array<Omit<KnowledgeEntry, "id"> & { id?: number; example?: string | null }>,
+    products: Array<{ name: string; aliases: string[]; absorb_ml?: string | null; features?: string | null; size_guide?: string | null; wash_guide?: string | null; caution?: string | null }>,
+    actor: string,
+  ) {
+    this.tx(() => {
+      this.db.exec("delete from knowledge; delete from products;");
+      const ins = this.db.prepare(
+        "insert into knowledge (id, active, category, title, products, keywords, example, answer, conditions, min_route, valid_until, updated_by) values (?,?,?,?,?,?,?,?,?,?,?,?)",
+      );
+      for (const e of entries) {
+        ins.run(e.id ?? null, e.active ? 1 : 0, e.category, e.title, JSON.stringify(e.products), JSON.stringify(e.keywords), e.example ?? null, e.answer, e.conditions, e.minRoute, e.validUntil, actor);
+      }
+      const insP = this.db.prepare("insert or replace into products (name, aliases, absorb_ml, features, size_guide, wash_guide, caution) values (?,?,?,?,?,?,?)");
+      for (const p of products) insP.run(p.name, JSON.stringify(p.aliases), p.absorb_ml ?? null, p.features ?? null, p.size_guide ?? null, p.wash_guide ?? null, p.caution ?? null);
+    });
+  }
+
+  updateKnowledge(id: number, patch: { active?: boolean; answer?: string }, actor: string): boolean {
+    const now = new Date().toISOString();
+    let changed = 0;
+    if (patch.active !== undefined) changed += Number(this.db.prepare("update knowledge set active = ?, updated_at = ?, updated_by = ? where id = ?").run(patch.active ? 1 : 0, now, actor, id).changes);
+    if (patch.answer !== undefined) changed += Number(this.db.prepare("update knowledge set answer = ?, updated_at = ?, updated_by = ? where id = ?").run(patch.answer, now, actor, id).changes);
+    return changed > 0;
+  }
+
+  // ───────── 분류·초안 ─────────
+  /** 아직 분류·초안이 없는 신규 문의 */
+  pendingForDraft(limit = 200): Array<{ id: number; channel: string; body_masked: string; title: string | null; product_name: string | null; pii_detected: boolean; order_id: string | null; platform_answered: boolean }> {
+    return (this.db.prepare("select * from inquiries where drafted_at is null order by id limit ?").all(limit) as Row[]).map((r) => ({
+      id: Number(r.id),
+      channel: String(r.channel),
+      body_masked: String(r.body_masked),
+      title: (r.title as string) ?? null,
+      product_name: (r.product_name as string) ?? null,
+      pii_detected: !!r.pii_detected,
+      order_id: (r.order_id as string) ?? null,
+      platform_answered: !!r.platform_answered,
+    }));
+  }
+
+  /** 같은 주문의 다른 불만 문의 수 (반복 불만 → 사람 전용) */
+  priorComplaints(orderId: string | null, excludeId: number): number {
+    if (!orderId) return 0;
+    return Number(
+      (this.db
+        .prepare("select count(*) n from inquiries where order_id = ? and id <> ? and category in ('exchange','wrong','defect','complaint')")
+        .get(orderId, excludeId) as Row).n,
+    );
+  }
+
+  /** 시스템이 만든 초안 저장 + 문의에 경로·분류 기록 */
+  saveSystemDraft(inquiryId: number, r: DraftResult) {
+    this.tx(() => {
+      this.db
+        .prepare("insert into drafts (inquiry_id, text, route, category, confidence, knowledge_ids, detail, created_by) values (?,?,?,?,?,?,?, 'system')")
+        .run(inquiryId, r.text, r.route, r.classification.category, r.confidence, JSON.stringify(r.usedIds), JSON.stringify({
+          categoryLabel: r.classification.categoryLabel,
+          products: r.products,
+          matches: r.matches,
+          conditions: r.conditions,
+          forbidden: r.forbidden,
+          warnings: r.warnings,
+          reasons: r.reasons,
+        }));
+      this.db.prepare("update inquiries set route = ?, category = ?, drafted_at = ? where id = ?").run(r.route, r.classification.category, new Date().toISOString(), inquiryId);
+    });
+  }
+
+  /** 담당자가 고친 초안 저장 (경로는 그대로, 사람 수정본으로 기록) */
+  saveEditedDraft(inquiryId: number, text: string, actor: string, check: { forbidden: unknown[]; warnings: string[] }) {
+    const last = this.latestDraft(inquiryId);
+    this.db
+      .prepare("insert into drafts (inquiry_id, text, route, category, confidence, knowledge_ids, detail, created_by) values (?,?,?,?,?,?,?,?)")
+      .run(inquiryId, text, (last?.route as string) ?? "approve", (last?.category as string) ?? null, null, JSON.stringify(last?.knowledge_ids ?? []), JSON.stringify({ ...((last?.detail as object) ?? {}), forbidden: check.forbidden, warnings: check.warnings, edited: true }), actor);
+  }
+
+  latestDraft(inquiryId: number): Record<string, unknown> | null {
+    const r = this.db.prepare("select * from drafts where inquiry_id = ? order by id desc limit 1").get(inquiryId) as Row | undefined;
+    if (!r) return null;
+    return { ...r, knowledge_ids: JSON.parse(String(r.knowledge_ids)), detail: JSON.parse(String(r.detail)) };
+  }
+
+  /** 지식 DB가 바뀌면 사람이 손대지 않은 신규 문의 초안을 다시 만들도록 표시 */
+  markForRedraft(): number {
+    return Number(
+      this.db
+        .prepare(
+          "update inquiries set drafted_at = null where status = 'new' and not exists (select 1 from drafts d where d.inquiry_id = inquiries.id and d.created_by <> 'system')",
+        )
+        .run().changes,
+    );
+  }
+
+  resetDraft(inquiryId: number) {
+    this.db.prepare("update inquiries set drafted_at = null where id = ?").run(inquiryId);
   }
 
   // ───────── 백업 ─────────

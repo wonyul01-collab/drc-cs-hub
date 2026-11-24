@@ -9,6 +9,9 @@ interface Counts {
   dueSoon: number;
   pii: number;
   today: number;
+  routeAuto: number;
+  routeApprove: number;
+  routeHuman: number;
 }
 
 interface Run {
@@ -43,6 +46,11 @@ export default function Home() {
     { label: "개인정보 포함 (직접 확인)", value: counts.pii, to: "/inquiries?status=new&pii=1", tone: counts.pii ? "text-amber-700" : "text-gray-800" },
     { label: "오늘 들어온 문의", value: counts.today, to: "/inquiries", tone: "text-gray-800" },
   ];
+  const routeTiles = [
+    { label: "③ 사람 전용", sub: "건강·분쟁·개인정보 등 직접 확인", value: counts.routeHuman, to: "/inquiries?status=new&route=human", tone: "text-red-600" },
+    { label: "② 승인 필요", sub: "초안 확인·수정 후 답변", value: counts.routeApprove, to: "/inquiries?status=new&route=approve", tone: "text-amber-700" },
+    { label: "① 자동 가능", sub: "초안 그대로 써도 되는 단순 문의", value: counts.routeAuto, to: "/inquiries?status=new&route=auto", tone: "text-green-700" },
+  ];
 
   return (
     <div className="space-y-6">
@@ -51,6 +59,16 @@ export default function Home() {
         {tiles.map((t) => (
           <Link key={t.label} to={t.to} className="rounded-2xl bg-white p-5 shadow-sm hover:ring-2 hover:ring-blue-400">
             <div className="font-semibold text-gray-600">{t.label}</div>
+            <div className={`mt-2 text-4xl font-bold ${t.tone}`}>{t.value}</div>
+          </Link>
+        ))}
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        {routeTiles.map((t) => (
+          <Link key={t.label} to={t.to} className="rounded-2xl bg-white p-5 shadow-sm hover:ring-2 hover:ring-blue-400">
+            <div className="font-bold">{t.label}</div>
+            <div className="text-gray-600">{t.sub}</div>
             <div className={`mt-2 text-4xl font-bold ${t.tone}`}>{t.value}</div>
           </Link>
         ))}
