@@ -15,6 +15,8 @@ export interface EngineDeps {
   dataGoKrKey: string | null;
   /** 수집 직후 실행 (분류·초안 만들기) */
   afterCollect?: () => void | Promise<void>;
+  /** 운영 시간 매 분 실행 (알림 계획·발송) */
+  everyOperatingMinute?: (ctx: { now: Date; holidays: ReadonlySet<string>; operating: OperatingConfig; failingSources: string[] }) => void | Promise<void>;
 }
 
 /**
@@ -78,6 +80,16 @@ export class Engine {
         } catch (e) {
           log.error("분류·초안 만들기 실패", e);
         }
+      }
+      try {
+        await this.d.everyOperatingMinute?.({
+          now,
+          holidays: this.holidays,
+          operating: this.operating!,
+          failingSources: this.lastResults.filter((r) => !r.ok).map((r) => r.label),
+        });
+      } catch (e) {
+        log.error("알림 처리 실패", e);
       }
       await this.d.store.heartbeat(this.d.workerId, "operating", {
         lastCollectAt: this.lastCollectAt ? new Date(this.lastCollectAt).toISOString() : null,

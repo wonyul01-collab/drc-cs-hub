@@ -23,7 +23,21 @@ export interface Draft {
   };
 }
 
-type Detail = InquiryRow & { draft: Draft | null; refs: Array<{ id: number; title: string; conditions: string | null }> };
+type Detail = InquiryRow & {
+  draft: Draft | null;
+  refs: Array<{ id: number; title: string; conditions: string | null }>;
+  history: Array<{ action: string; actor: string; memo: string | null; at: string }>;
+  job: { status: string; payload: { content: string } } | null;
+  dryRun: boolean;
+};
+
+const ACTION_LABEL: Record<string, string> = {
+  approve: "승인",
+  approve_edited: "수정 후 승인",
+  unapprove: "승인 취소",
+  reject: "반려",
+  close: "직접 처리 완료",
+};
 
 const MAX = 1000;
 
@@ -35,6 +49,8 @@ export default function InquiryDetail() {
   const [text, setText] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [lock, setLock] = useState<{ mine: boolean; name: string | null } | null>(null);
+  const [problems, setProblems] = useState<string[]>([]);
 
   const load = () =>
     api<Detail>(`/api/inquiries/${Number(id)}`)
@@ -47,6 +63,26 @@ export default function InquiryDetail() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  // 화면을 열어 두는 동안 "처리 중" 표시 (1분마다 갱신, 나가면 해제)
+  useEffect(() => {
+    const qid = Number(id);
+    const grab = () =>
+      api<{ mine: boolean; name: string | null }>(`/api/inquiries/${qid}/lock`, { method: "POST", body: {} })
+        .then(setLock)
+        .catch(() => undefined);
+    grab();
+    const t = setInterval(grab, 60_000);
+    const release = () => {
+      navigator.sendBeacon?.(`/api/inquiries/${qid}/unlock-beacon`);
+    };
+    window.addEventListener("pagehide", release);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("pagehide", release);
+      api(`/api/inquiries/${qid}/lock`, { method: "DELETE" }).catch(() => undefined);
+    };
   }, [id]);
 
   if (err) return <ErrorBox message={`불러오기 실패: ${err}`} />;
@@ -86,6 +122,46 @@ export default function InquiryDetail() {
     }
   }
 
+  async function decide(action: "approve" | "unapprove" | "reject" | "close") {
+    let memo: string | null = null;
+    if (action === "reject") {
+      memo = prompt("반려 사유를 적어주세요 (예: 상품 정보가 틀림)");
+      if (!memo) return;
+    }
+    if (action === "close" && !confirm("판매자센터에서 직접 답변했거나 답변이 필요 없는 문의로 '처리 완료' 할까요?")) return;
+    if (action === "unapprove" && !confirm("승인을 취소할까요?")) return;
+    setBusy(true);
+    setProblems([]);
+    try {
+      const body: Record<string, unknown> = { action };
+      if (action === "approve") body.text = text;
+      if (memo) body.memo = memo;
+      const res = await fetch(`/api/inquiries/${row!.id}/decision`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg(j.error ?? `실패 (${res.status})`);
+        setProblems(j.details ?? []);
+      } else {
+        setMsg(
+          action === "approve"
+            ? j.dryRun
+              ? "승인했습니다. 아직 마켓 자동 등록 전 단계라, [복사하기] 후 판매자센터에 붙여넣어 주세요."
+              : "승인했습니다. 잠시 후 마켓에 자동 등록됩니다."
+            : action === "close"
+              ? "처리 완료했습니다."
+              : action === "reject"
+                ? "반려 사유를 기록했습니다. 초안을 고치거나 다시 만들어 주세요."
+                : "승인을 취소했습니다.",
+        );
+        await load();
+      }
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function redraft() {
     if (dirty && !confirm("고친 내용이 사라집니다. 지식 DB로 다시 만들까요?")) return;
     setBusy(true);
@@ -105,6 +181,18 @@ export default function InquiryDetail() {
       <button onClick={() => navigate(-1)} className="font-semibold text-blue-700">
         ◀ 목록으로
       </button>
+      {lock && !lock.mine && (
+        <p role="alert" className="rounded-xl bg-amber-300 p-4 text-lg font-bold text-gray-900">
+          🔒 {lock.name}님이 처리 중입니다. 보기만 가능하고, 승인·수정은 {lock.name}님이 화면을 닫은 뒤(최대 5분) 할 수 있습니다.
+        </p>
+      )}
+      {row.approved_at && row.status === "new" && (
+        <p className="rounded-xl bg-green-100 p-4 text-lg font-bold text-green-900">
+          ✅ {row.approved_by}님이 승인했습니다 · {fmtRelative(row.approved_at)}
+          {row.dryRun && " — 판매자센터에 붙여넣은 뒤 [직접 처리 완료]를 누르면 목록에서 빠집니다."}
+        </p>
+      )}
+      {row.status === "closed" && <p className="rounded-xl bg-gray-200 p-4 text-lg font-bold">✔ 처리 완료된 문의입니다.</p>}
       <Card>
         <div className="flex flex-wrap items-center gap-2">
           <ChannelBadge c={row.channel} />
@@ -197,7 +285,8 @@ export default function InquiryDetail() {
               value={text}
               onChange={(e) => setText(e.target.value)}
               rows={14}
-              className="mt-2 w-full rounded-xl border-2 border-gray-300 p-4 text-lg leading-relaxed"
+              readOnly={!!row.approved_at || row.status !== "new" || (lock !== null && !lock.mine)}
+              className="mt-2 w-full rounded-xl border-2 border-gray-300 p-4 text-lg leading-relaxed read-only:bg-gray-50"
             />
             <div className={`text-right ${text.length > MAX ? "font-bold text-red-700" : "text-gray-600"}`}>
               {text.length} / {MAX}자
@@ -210,13 +299,58 @@ export default function InquiryDetail() {
               <a href={sellerCenter} target="_blank" rel="noreferrer" className="rounded-xl bg-gray-800 px-6 py-3 text-lg font-bold text-white">
                 판매자센터 열기 ↗
               </a>
-              <button onClick={save} disabled={!dirty || busy} className="rounded-xl border-2 border-blue-600 px-5 py-3 font-bold text-blue-700 disabled:opacity-40">
+              <button onClick={save} disabled={!dirty || busy || (lock !== null && !lock.mine) || !!row.approved_at} className="rounded-xl border-2 border-blue-600 px-5 py-3 font-bold text-blue-700 disabled:opacity-40">
                 고친 내용 저장
               </button>
               <button onClick={redraft} disabled={busy} className="rounded-xl border-2 border-gray-300 px-5 py-3 font-semibold">
                 지식 DB로 다시 만들기
               </button>
             </div>
+            {row.status === "new" && (
+              <div className="mt-4 rounded-xl bg-blue-50 p-4">
+                <div className="mb-2 font-bold">처리하기</div>
+                <div className="flex flex-wrap gap-2">
+                  {!row.approved_at && d.route !== "human" && (
+                    <button
+                      onClick={() => decide("approve")}
+                      disabled={busy || (lock !== null && !lock.mine)}
+                      className="rounded-xl bg-green-600 px-6 py-3 text-lg font-bold text-white disabled:opacity-40"
+                    >
+                      ✅ {dirty ? "수정한 내용으로 승인" : "승인"}
+                    </button>
+                  )}
+                  {row.approved_at && (
+                    <button onClick={() => decide("unapprove")} disabled={busy} className="rounded-xl border-2 border-gray-400 px-5 py-3 font-bold disabled:opacity-40">
+                      승인 취소
+                    </button>
+                  )}
+                  {!row.approved_at && (
+                    <button
+                      onClick={() => decide("reject")}
+                      disabled={busy || (lock !== null && !lock.mine)}
+                      className="rounded-xl border-2 border-red-300 px-5 py-3 font-bold text-red-700 disabled:opacity-40"
+                    >
+                      ↩ 반려
+                    </button>
+                  )}
+                  <button
+                    onClick={() => decide("close")}
+                    disabled={busy || (lock !== null && !lock.mine)}
+                    className="rounded-xl border-2 border-gray-800 px-5 py-3 font-bold disabled:opacity-40"
+                  >
+                    ✔ 직접 처리 완료
+                  </button>
+                </div>
+                {d.route === "human" && <p className="mt-2 text-red-800">③ 사람 전용은 승인 버튼이 없습니다. 판매자센터에서 직접 답변한 뒤 [직접 처리 완료]를 눌러주세요.</p>}
+              </div>
+            )}
+            {problems.length > 0 && (
+              <ul className="mt-3 list-disc space-y-1 rounded-lg bg-red-50 p-4 pl-8 font-semibold text-red-800">
+                {problems.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+            )}
             {msg && <p className="mt-3 rounded-lg bg-green-50 p-3 font-semibold text-green-800">{msg}</p>}
 
             <details className="mt-5 rounded-xl bg-gray-50 p-4">
@@ -238,9 +372,22 @@ export default function InquiryDetail() {
           </>
         )}
       </Card>
-      <p className="text-gray-600">
-        지금은 마켓에 자동으로 등록하지 않습니다. 복사해서 판매자센터에 붙여넣어 주세요. (승인 버튼·자동 등록은 다음 단계에서 추가)
-      </p>
+      {row.history.length > 0 && (
+        <Card>
+          <h2 className="text-xl font-bold">처리 기록</h2>
+          <ul className="mt-2 space-y-1">
+            {row.history.map((h, i) => (
+              <li key={i}>
+                {fmtDateTime(h.at)} · <b>{h.actor}</b> · {ACTION_LABEL[h.action] ?? h.action}
+                {h.memo && <span className="text-gray-700"> — {h.memo}</span>}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+      {row.dryRun && (
+        <p className="text-gray-600">지금은 마켓에 자동으로 등록하지 않습니다. 승인 후 [복사하기] → 판매자센터에 붙여넣고 → [직접 처리 완료]를 눌러주세요.</p>
+      )}
     </div>
   );
 }

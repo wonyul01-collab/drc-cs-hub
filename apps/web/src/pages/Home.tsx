@@ -10,6 +10,7 @@ interface Counts {
   pii: number;
   today: number;
   routeAuto: number;
+  approved: number;
   routeApprove: number;
   routeHuman: number;
 }
@@ -99,6 +100,63 @@ function UpdateBox() {
   );
 }
 
+interface NotifyInfo {
+  configured: boolean;
+  recipients: string[];
+  recent: Array<{ id: number; kind: string; subject: string; status: string; attempts: number; last_error: string | null; created_at: string }>;
+}
+const NOTIFY_STATUS: Record<string, string> = { pending: "보내는 중", sent: "보냄", failed: "실패" };
+
+function NotifyBox() {
+  const [info, setInfo] = useState<NotifyInfo | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => api<NotifyInfo>("/api/notifications").then(setInfo).catch(() => setInfo(null));
+  useEffect(() => {
+    load();
+  }, []);
+  async function test() {
+    setBusy(true);
+    try {
+      const r = await api<{ sentTo: number }>("/api/notifications/test", { method: "POST", body: {} });
+      setMsg(`테스트 메일을 ${r.sentTo}명에게 보냈습니다. 메일함(스팸함 포함)을 확인하세요.`);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!info) return null;
+  return (
+    <div className="mt-4 border-t border-gray-200 pt-4">
+      <div className="font-bold">알림 메일</div>
+      {!info.configured ? (
+        <p className="mt-1 text-amber-800">
+          보내는 메일 계정이 없습니다. 메인 PC에서 <b>3-settings.bat</b> → <b>MAIL_USER</b>, <b>MAIL_PASSWORD</b> 를 넣고 허브를 다시 켜세요.
+        </p>
+      ) : (
+        <p className="mt-1 text-gray-700">
+          받는 사람 {info.recipients.length}명 {info.recipients.length === 0 && "— [담당자] 메뉴에서 각자 이메일을 넣어주세요"}
+        </p>
+      )}
+      <button onClick={test} disabled={busy || !info.configured} className="mt-2 rounded-xl border-2 border-blue-600 px-5 py-3 font-bold text-blue-700 disabled:opacity-40">
+        ✉ 테스트 메일 보내기
+      </button>
+      {msg && <p className="mt-2 font-semibold text-green-800">{msg}</p>}
+      {info.recent.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {info.recent.slice(0, 8).map((n) => (
+            <li key={n.id} className={n.status === "failed" ? "text-red-700" : "text-gray-700"}>
+              {fmtDateTime(n.created_at)} · {n.subject.replace("[DRC CS] ", "")} · <b>{NOTIFY_STATUS[n.status] ?? n.status}</b>
+              {n.last_error && ` — ${n.last_error}`}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function Home() {
   const { user } = useAuth();
   const [counts, setCounts] = useState<Counts | null>(null);
@@ -121,7 +179,7 @@ export default function Home() {
     { label: "처리할 신규 문의", value: counts.newTotal, to: "/inquiries?status=new", tone: "text-blue-700" },
     { label: "기한 임박 (4시간 이내)", value: counts.dueSoon, to: "/inquiries?status=new&sort=deadline", tone: counts.dueSoon ? "text-red-600" : "text-gray-800" },
     { label: "개인정보 포함 (직접 확인)", value: counts.pii, to: "/inquiries?status=new&pii=1", tone: counts.pii ? "text-amber-700" : "text-gray-800" },
-    { label: "오늘 들어온 문의", value: counts.today, to: "/inquiries", tone: "text-gray-800" },
+    { label: "승인됨 · 판매자센터 등록 대기", value: counts.approved, to: "/inquiries?status=approved", tone: counts.approved ? "text-green-700" : "text-gray-800" },
   ];
   const routeTiles = [
     { label: "③ 사람 전용", sub: "건강·분쟁·개인정보 등 직접 확인", value: counts.routeHuman, to: "/inquiries?status=new&route=human", tone: "text-red-600" },
@@ -180,6 +238,7 @@ export default function Home() {
         <Card>
           <h2 className="text-xl font-bold">관리</h2>
           <BackfillButton />
+          <NotifyBox />
           <UpdateBox />
         </Card>
       )}

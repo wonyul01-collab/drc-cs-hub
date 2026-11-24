@@ -11,7 +11,7 @@ export default function Users() {
   const [list, setList] = useState<User[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", login: "", password: "", role: "agent" as Role });
+  const [form, setForm] = useState({ name: "", login: "", password: "", role: "agent" as Role, email: "" });
 
   const load = () =>
     api<User[]>("/api/users")
@@ -39,7 +39,13 @@ export default function Users() {
   async function add(e: React.FormEvent) {
     e.preventDefault();
     await run(() => api("/api/users", { method: "POST", body: form }), `${form.name} 계정을 만들었습니다. 아이디·비밀번호를 담당자에게 알려주세요.`);
-    setForm({ name: "", login: "", password: "", role: "agent" });
+    setForm({ name: "", login: "", password: "", role: "agent", email: "" });
+  }
+
+  function setEmail(u: User) {
+    const v = prompt(`${u.name}님이 알림 받을 이메일 (지우려면 비워두기)`, u.email ?? "");
+    if (v === null) return;
+    run(() => api(`/api/users/${u.id}`, { method: "PATCH", body: { email: v.trim() || null } }), `${u.name}님 이메일을 저장했습니다.`);
   }
 
   function resetPw(u: User) {
@@ -56,7 +62,7 @@ export default function Users() {
 
       <Card>
         <h2 className="text-xl font-bold">새 담당자 계정 만들기</h2>
-        <form onSubmit={add} className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <form onSubmit={add} className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           <input required placeholder="이름" aria-label="이름" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={input} />
           <input required placeholder="아이디" aria-label="아이디" value={form.login} onChange={(e) => setForm({ ...form, login: e.target.value })} className={input} />
           <input
@@ -69,6 +75,7 @@ export default function Users() {
             onChange={(e) => setForm({ ...form, password: e.target.value })}
             className={input}
           />
+          <input type="email" placeholder="알림 받을 이메일 (선택)" aria-label="이메일" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={input} />
           <select aria-label="역할" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })} className={`${input} bg-white`}>
             {Object.entries(ROLE_LABEL).map(([k, v]) => (
               <option key={k} value={k}>{v}</option>
@@ -90,7 +97,21 @@ export default function Users() {
                     {u.name} {!u.active && <span className="text-red-700">(사용 중지)</span>}
                   </div>
                   <div className="text-gray-600">아이디: {u.login}</div>
+                  <div className="text-gray-600">
+                    알림 메일: {u.email ? `${u.email} ${u.notify ? "(받음)" : "(안 받음)"}` : "없음"}
+                  </div>
                 </div>
+                <button onClick={() => setEmail(u)} className="rounded-lg border-2 border-gray-300 px-4 py-2 font-semibold">
+                  이메일 설정
+                </button>
+                {u.email && (
+                  <button
+                    onClick={() => run(() => api(`/api/users/${u.id}`, { method: "PATCH", body: { notify: !u.notify } }), u.notify ? `${u.name}님 알림을 껐습니다.` : `${u.name}님 알림을 켰습니다.`)}
+                    className="rounded-lg border-2 border-gray-300 px-4 py-2 font-semibold"
+                  >
+                    {u.notify ? "알림 끄기" : "알림 켜기"}
+                  </button>
+                )}
                 <select
                   aria-label={`${u.name} 역할`}
                   value={u.role}

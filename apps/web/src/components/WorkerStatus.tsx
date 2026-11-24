@@ -11,12 +11,13 @@ interface Status {
 export default function WorkerStatus() {
   const [st, setSt] = useState<Status | null | undefined>(undefined);
   const [down, setDown] = useState(false);
+  const [notifyFailed, setNotifyFailed] = useState(0);
 
   useEffect(() => {
     let alive = true;
     const load = () =>
-      api<{ status: Status | null }>("/api/status")
-        .then((r) => alive && (setSt(r.status), setDown(false)))
+      api<{ status: Status | null; notify?: { failedToday: number } }>("/api/status")
+        .then((r) => alive && (setSt(r.status), setDown(false), setNotifyFailed(r.notify?.failedToday ?? 0)))
         .catch(() => alive && setDown(true));
     load();
     const t = setInterval(load, 60_000);
@@ -43,6 +44,13 @@ export default function WorkerStatus() {
     return (
       <div role="alert" className="bg-red-600 px-4 py-3 text-center text-lg font-bold text-white">
         ⛔ 문의 수집이 멈췄습니다 — 메인 PC의 허브 프로그램을 다시 켜 주세요 (마지막 신호: {st ? fmtRelative(st.beat_at) : "없음"})
+      </div>
+    );
+  }
+  if (notifyFailed > 0) {
+    return (
+      <div role="alert" className="bg-amber-400 px-4 py-3 text-center font-bold text-gray-900">
+        ⚠ 알림 메일 {notifyFailed}건을 보내지 못했습니다 — 홈 → 관리 → 알림에서 확인하세요
       </div>
     );
   }

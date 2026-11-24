@@ -8,6 +8,7 @@ import { HubDb } from "./db.ts";
 import { Engine } from "./engine.ts";
 import { log, setLogDir, setRedactor } from "./log.ts";
 import { naverSources } from "./naver/sources.ts";
+import { EmailNotifier, flushNotifications, planNotifications } from "./notify.ts";
 import { processDrafts } from "./pipeline.ts";
 import { createHubServer } from "./server.ts";
 import { Updater } from "./updater.ts";
@@ -59,7 +60,25 @@ async function main() {
     }
   }
 
-  const engine = new Engine({ store: db, sources, workerId: cfg.workerId, lookbackDays: cfg.lookbackDays, dataGoKrKey: cfg.dataGoKrKey, afterCollect: () => void processDrafts(db) });
+  // 알림 (1차: 이메일)
+  const notifier = cfg.smtp ? new EmailNotifier(cfg.smtp) : null;
+  const privateLan = lanAddresses(cfg.port).find((u) => /\/\/(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(u));
+  const baseUrl = cfg.hubUrl ?? privateLan ?? `http://localhost:${cfg.port}`;
+  if (!notifier) log.warn("알림 메일 계정이 설정되지 않아 알림을 보내지 않습니다 (3-settings.bat → MAIL_USER, MAIL_PASSWORD).");
+
+  const engine = new Engine({
+    store: db,
+    sources,
+    workerId: cfg.workerId,
+    lookbackDays: cfg.lookbackDays,
+    dataGoKrKey: cfg.dataGoKrKey,
+    afterCollect: () => void processDrafts(db),
+    everyOperatingMinute: async (ctx) => {
+      if (!notifier) return;
+      planNotifications(db, { ...ctx, baseUrl, coupangKeyIssuedAt: cfg.coupang?.keyIssuedAt ?? null });
+      await flushNotifications(db, notifier);
+    },
+  });
 
   // 화면 제공
   const webDir = resolve(import.meta.dirname, "../../web/dist");
@@ -72,7 +91,16 @@ async function main() {
       process.exit(0);
     });
   };
-  const server = createHubServer({ db, webDir, backup: () => db.backup(cfg.backupDir), updater, onUpdate: () => restartForUpdate("관리자 요청") });
+  const server = createHubServer({
+    db,
+    webDir,
+    backup: () => db.backup(cfg.backupDir),
+    updater,
+    onUpdate: () => restartForUpdate("관리자 요청"),
+    dryRun: cfg.dryRun,
+    notifier,
+    baseUrl,
+  });
   server.listen(cfg.port, "0.0.0.0", () => {
     log.info("──────────────────────────────────────────────");
     log.info("DRC CS 허브가 켜졌습니다.");

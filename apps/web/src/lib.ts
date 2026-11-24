@@ -7,6 +7,8 @@ export interface User {
   name: string;
   role: Role;
   active: boolean;
+  email?: string | null;
+  notify?: boolean;
 }
 
 export class ApiError extends Error {

@@ -24,6 +24,10 @@ export interface InquiryRow {
   can_reply: boolean;
   status: InquiryStatus;
   route?: "auto" | "approve" | "human" | null;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  locked_name?: string | null;
+  locked_at?: string | null;
   meta?: { option?: string | null; category?: string | null };
 }
 
@@ -86,6 +90,7 @@ export default function Inquiries() {
         </select>
         <select aria-label="상태" className={select} value={status} onChange={(e) => set("status", e.target.value)}>
           <option value="">전체 상태</option>
+          <option value="approved">승인됨 (판매자센터 등록 대기)</option>
           {Object.entries(STATUS_LABEL).map(([k, v]) => (
             <option key={k} value={k}>{v}</option>
           ))}
@@ -134,7 +139,9 @@ export default function Inquiries() {
                     <ChannelBadge c={r.channel} />
                     <KindBadge k={r.kind} />
                     <StatusBadge s={r.status} />
-                    {r.status === "new" && <RouteBadge r={r.route} />}
+                    {r.status === "new" && !r.approved_at && <RouteBadge r={r.route} />}
+                    {r.status === "new" && r.approved_at && <Badge tone="green">✅ 승인됨 · 판매자센터 등록 대기</Badge>}
+                    {r.locked_name && r.locked_at && Date.now() - Date.parse(r.locked_at) < 5 * 60_000 && <Badge tone="amber">🔒 {r.locked_name}님 처리 중</Badge>}
                     {r.pii_detected && <Badge tone="amber">개인정보 포함</Badge>}
                     {!r.can_reply && r.status === "new" && <Badge>답변 불가 상태</Badge>}
                     {rem && <Badge tone={rem.level === "ok" ? "gray" : rem.level === "warn" ? "amber" : "red"}>⏰ {rem.text}</Badge>}

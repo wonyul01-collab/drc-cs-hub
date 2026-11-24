@@ -43,6 +43,8 @@ export interface User {
   name: string;
   role: Role;
   active: boolean;
+  email?: string | null;
+  notify?: boolean;
 }
 
 export interface InquiryFilter {
@@ -146,6 +148,42 @@ create table if not exists drafts (
   created_by text not null default 'system'
 );
 create index if not exists drafts_inquiry_idx on drafts (inquiry_id, id desc);
+create table if not exists approvals (
+  id integer primary key autoincrement,
+  inquiry_id integer not null references inquiries(id) on delete cascade,
+  draft_id integer,
+  action text not null,
+  actor text not null,
+  memo text,
+  at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+create index if not exists approvals_inquiry_idx on approvals (inquiry_id, id);
+create table if not exists post_jobs (
+  id integer primary key autoincrement,
+  inquiry_id integer not null references inquiries(id) on delete cascade,
+  draft_id integer not null,
+  idempotency_key text not null unique,
+  status text not null,
+  payload text not null,
+  response text,
+  attempts integer not null default 0,
+  created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at text
+);
+create table if not exists notifications (
+  id integer primary key autoincrement,
+  key text not null unique,
+  kind text not null,
+  recipients text not null,
+  subject text not null,
+  body text not null,
+  status text not null default 'pending',
+  attempts integer not null default 0,
+  last_error text,
+  created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  sent_at text
+);
+create index if not exists notifications_status_idx on notifications (status);
 create table if not exists audit_log (
   id integer primary key autoincrement,
   at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
@@ -200,6 +238,13 @@ export class HubDb implements Store {
     if (!cols.has("category")) this.db.exec("alter table inquiries add column category text");
     if (!cols.has("drafted_at")) this.db.exec("alter table inquiries add column drafted_at text");
     this.db.exec("create index if not exists inquiries_route_idx on inquiries (route)");
+    // Phase 3: 승인·잠금·처리 완료
+    for (const c of ["approved_at", "approved_by", "closed_at", "closed_by", "locked_by", "locked_name", "locked_at"]) {
+      if (!cols.has(c)) this.db.exec(`alter table inquiries add column ${c} text`);
+    }
+    const ucols = new Set((this.db.prepare("pragma table_info(users)").all() as Row[]).map((r) => String(r.name)));
+    if (!ucols.has("email")) this.db.exec("alter table users add column email text");
+    if (!ucols.has("notify")) this.db.exec("alter table users add column notify integer not null default 1");
   }
 
   close() {
@@ -338,12 +383,14 @@ export class HubDb implements Store {
   }
 
   listUsers(): User[] {
-    return (this.db.prepare("select id, login, name, role, active from users order by id").all() as Row[]).map(
-      (r) => ({ ...(r as unknown as User), active: !!r.active }),
+    return (this.db.prepare("select id, login, name, role, active, email, notify from users order by id").all() as Row[]).map(
+      (r) => ({ ...(r as unknown as User), active: !!r.active, notify: !!r.notify }),
     );
   }
 
-  updateUser(id: number, patch: { role?: Role; active?: boolean; password?: string; name?: string }) {
+  updateUser(id: number, patch: { role?: Role; active?: boolean; password?: string; name?: string; email?: string | null; notify?: boolean }) {
+    if (patch.email !== undefined) this.db.prepare("update users set email = ? where id = ?").run(patch.email ? patch.email.trim() : null, id);
+    if (patch.notify !== undefined) this.db.prepare("update users set notify = ? where id = ?").run(patch.notify ? 1 : 0, id);
     if (patch.role) this.db.prepare("update users set role = ? where id = ?").run(patch.role, id);
     if (patch.active !== undefined) {
       this.db.prepare("update users set active = ? where id = ?").run(patch.active ? 1 : 0, id);
@@ -387,7 +434,9 @@ export class HubDb implements Store {
     const args: Array<string | number> = [];
     if (f.channel) (where.push("channel = ?"), args.push(f.channel));
     if (f.kind) (where.push("kind = ?"), args.push(f.kind));
-    if (f.status) (where.push("status = ?"), args.push(f.status));
+    if (f.status === "approved") where.push("status = 'new' and approved_at is not null");
+    else if (f.status === "new") where.push("status = 'new' and approved_at is null");
+    else if (f.status) (where.push("status = ?"), args.push(f.status));
     if (f.route) (where.push("route = ?"), args.push(f.route));
     if (f.pii) where.push("pii_detected = 1");
     if (f.q) {
@@ -419,13 +468,14 @@ export class HubDb implements Store {
       )
       .all() as Row[];
     return {
-      newTotal: n("select count(*) n from inquiries where status = 'new'"),
-      dueSoon: n("select count(*) n from inquiries where status = 'new' and can_reply = 1 and deadline_at is not null and deadline_at <= ?", soon),
-      pii: n("select count(*) n from inquiries where status = 'new' and pii_detected = 1"),
+      newTotal: n("select count(*) n from inquiries where status = 'new' and approved_at is null"),
+      approved: n("select count(*) n from inquiries where status = 'new' and approved_at is not null"),
+      dueSoon: n("select count(*) n from inquiries where status = 'new' and approved_at is null and can_reply = 1 and deadline_at is not null and deadline_at <= ?", soon),
+      pii: n("select count(*) n from inquiries where status = 'new' and approved_at is null and pii_detected = 1"),
       today: n("select count(*) n from inquiries where first_seen_at >= ?", todayStartIso),
-      routeAuto: n("select count(*) n from inquiries where status = 'new' and route = 'auto'"),
-      routeApprove: n("select count(*) n from inquiries where status = 'new' and route = 'approve'"),
-      routeHuman: n("select count(*) n from inquiries where status = 'new' and route = 'human'"),
+      routeAuto: n("select count(*) n from inquiries where status = 'new' and approved_at is null and route = 'auto'"),
+      routeApprove: n("select count(*) n from inquiries where status = 'new' and approved_at is null and route = 'approve'"),
+      routeHuman: n("select count(*) n from inquiries where status = 'new' and approved_at is null and route = 'human'"),
       runs: runs.map((r) => ({ ...r, ok: !!r.ok })),
     };
   }
@@ -577,7 +627,7 @@ export class HubDb implements Store {
     return Number(
       this.db
         .prepare(
-          "update inquiries set drafted_at = null where status = 'new' and not exists (select 1 from drafts d where d.inquiry_id = inquiries.id and d.created_by <> 'system')",
+          "update inquiries set drafted_at = null where status = 'new' and approved_at is null and not exists (select 1 from drafts d where d.inquiry_id = inquiries.id and d.created_by <> 'system')",
         )
         .run().changes,
     );
@@ -585,6 +635,181 @@ export class HubDb implements Store {
 
   resetDraft(inquiryId: number) {
     this.db.prepare("update inquiries set drafted_at = null where id = ?").run(inquiryId);
+  }
+
+  // ───────── 동시 처리 잠금 (5분, 화면이 열려 있는 동안 1분마다 갱신) ─────────
+  static LOCK_MS = 5 * 60_000;
+
+  /** 잠금 잡기·갱신. 다른 사람이 잡고 있으면 그 사람 정보를 돌려준다 */
+  lock(inquiryId: number, user: { login: string; name: string }): { mine: boolean; by: string | null; name: string | null } {
+    const now = new Date();
+    const expired = new Date(now.getTime() - HubDb.LOCK_MS).toISOString();
+    const r = this.db
+      .prepare(
+        "update inquiries set locked_by = ?, locked_name = ?, locked_at = ? where id = ? and (locked_by is null or locked_by = ? or locked_at < ?)",
+      )
+      .run(user.login, user.name, now.toISOString(), inquiryId, user.login, expired);
+    if (Number(r.changes) > 0) return { mine: true, by: user.login, name: user.name };
+    const cur = this.db.prepare("select locked_by, locked_name from inquiries where id = ?").get(inquiryId) as Row | undefined;
+    return { mine: false, by: (cur?.locked_by as string) ?? null, name: (cur?.locked_name as string) ?? null };
+  }
+
+  unlock(inquiryId: number, login: string) {
+    this.db.prepare("update inquiries set locked_by = null, locked_name = null, locked_at = null where id = ? and locked_by = ?").run(inquiryId, login);
+  }
+
+  /** 지금 다른 사람이 처리 중인가 */
+  lockedByOther(inquiryId: number, login: string): string | null {
+    const r = this.db.prepare("select locked_by, locked_name, locked_at from inquiries where id = ?").get(inquiryId) as Row | undefined;
+    if (!r?.locked_by || r.locked_by === login) return null;
+    if (Date.parse(String(r.locked_at)) < Date.now() - HubDb.LOCK_MS) return null;
+    return String(r.locked_name ?? r.locked_by);
+  }
+
+  // ───────── 승인·반려·처리 완료 ─────────
+  /**
+   * 승인: 조건부 갱신으로 두 사람이 동시에 승인하는 것을 막는다 (같은 문의 등록 요청은 1건만 — idempotency_key 유일)
+   * dryRun이면 "실제로 보냈을 요청"만 기록 (Phase 5 전까지)
+   */
+  approve(
+    inquiryId: number,
+    draftId: number,
+    actor: string,
+    action: "approve" | "approve_edited",
+    payload: Record<string, unknown>,
+    dryRun: boolean,
+  ): boolean {
+    return this.tx(() => {
+      const now = new Date().toISOString();
+      const r = this.db
+        .prepare("update inquiries set approved_at = ?, approved_by = ? where id = ? and status = 'new' and approved_at is null")
+        .run(now, actor, inquiryId);
+      if (Number(r.changes) === 0) return false;
+      const q = this.db.prepare("select channel, kind, external_id from inquiries where id = ?").get(inquiryId) as Row;
+      this.db
+        .prepare("insert into post_jobs (inquiry_id, draft_id, idempotency_key, status, payload) values (?,?,?,?,?)")
+        .run(inquiryId, draftId, `${q.channel}:${q.kind}:${q.external_id}`, dryRun ? "dry_run" : "pending", JSON.stringify(payload));
+      this.db.prepare("insert into approvals (inquiry_id, draft_id, action, actor) values (?,?,?,?)").run(inquiryId, draftId, action, actor);
+      this.db.prepare("update inquiries set locked_by = null, locked_name = null, locked_at = null where id = ?").run(inquiryId);
+      return true;
+    });
+  }
+
+  /** 승인 취소 (아직 마켓에 실제로 등록되지 않은 경우만) */
+  unapprove(inquiryId: number, actor: string): boolean {
+    return this.tx(() => {
+      const job = this.db.prepare("select status from post_jobs where inquiry_id = ?").get(inquiryId) as Row | undefined;
+      if (job && !["dry_run", "pending", "failed"].includes(String(job.status))) return false;
+      const r = this.db.prepare("update inquiries set approved_at = null, approved_by = null where id = ? and status = 'new' and approved_at is not null").run(inquiryId);
+      if (Number(r.changes) === 0) return false;
+      this.db.prepare("delete from post_jobs where inquiry_id = ?").run(inquiryId);
+      this.db.prepare("insert into approvals (inquiry_id, action, actor) values (?, 'unapprove', ?)").run(inquiryId, actor);
+      return true;
+    });
+  }
+
+  reject(inquiryId: number, draftId: number | null, actor: string, memo: string) {
+    this.db.prepare("insert into approvals (inquiry_id, draft_id, action, actor, memo) values (?,?, 'reject', ?, ?)").run(inquiryId, draftId, actor, memo);
+  }
+
+  /** 직접 처리 완료 (판매자센터에서 직접 답변했거나 답변이 필요 없는 경우) */
+  closeInquiry(inquiryId: number, actor: string, memo: string | null): boolean {
+    return this.tx(() => {
+      const now = new Date().toISOString();
+      const r = this.db
+        .prepare("update inquiries set status = 'closed', closed_at = ?, closed_by = ?, locked_by = null, locked_name = null, locked_at = null where id = ? and status <> 'closed'")
+        .run(now, actor, inquiryId);
+      if (Number(r.changes) === 0) return false;
+      this.db.prepare("insert into approvals (inquiry_id, action, actor, memo) values (?, 'close', ?, ?)").run(inquiryId, actor, memo);
+      return true;
+    });
+  }
+
+  history(inquiryId: number) {
+    return this.db.prepare("select action, actor, memo, at from approvals where inquiry_id = ? order by id").all(inquiryId);
+  }
+
+  postJob(inquiryId: number) {
+    const r = this.db.prepare("select * from post_jobs where inquiry_id = ?").get(inquiryId) as Row | undefined;
+    return r ? { ...r, payload: JSON.parse(String(r.payload)) } : null;
+  }
+
+  // ───────── 알림 ─────────
+  /** 같은 key는 한 번만 (중복 알림 금지). 새로 넣었으면 true */
+  enqueueNotification(n: { key: string; kind: string; recipients: string[]; subject: string; body: string }): boolean {
+    if (!n.recipients.length) return false;
+    const r = this.db
+      .prepare("insert or ignore into notifications (key, kind, recipients, subject, body) values (?,?,?,?,?)")
+      .run(n.key, n.kind, JSON.stringify(n.recipients), n.subject, n.body);
+    return Number(r.changes) > 0;
+  }
+
+  pendingNotifications(maxAttempts: number) {
+    return (this.db.prepare("select * from notifications where status = 'pending' and attempts < ? order by id limit 20").all(maxAttempts) as Row[]).map((r) => ({
+      id: Number(r.id),
+      kind: String(r.kind),
+      recipients: JSON.parse(String(r.recipients)) as string[],
+      subject: String(r.subject),
+      body: String(r.body),
+      attempts: Number(r.attempts),
+    }));
+  }
+
+  markNotification(id: number, ok: boolean, error: string | null, maxAttempts: number) {
+    if (ok) this.db.prepare("update notifications set status = 'sent', sent_at = ?, attempts = attempts + 1, last_error = null where id = ?").run(new Date().toISOString(), id);
+    else
+      this.db
+        .prepare("update notifications set attempts = attempts + 1, last_error = ?, status = case when attempts + 1 >= ? then 'failed' else 'pending' end where id = ?")
+        .run(error, maxAttempts, id);
+  }
+
+  recentNotifications(limit = 20) {
+    return this.db.prepare("select id, kind, subject, status, attempts, last_error, created_at, sent_at from notifications order by id desc limit ?").all(limit);
+  }
+
+  failedNotificationCount(sinceIso: string): number {
+    return Number((this.db.prepare("select count(*) n from notifications where status = 'failed' and created_at >= ?").get(sinceIso) as Row).n);
+  }
+
+  /** 알림 받을 사람 이메일 (adminsOnly면 관리자만) */
+  notifyEmails(adminsOnly = false): string[] {
+    const rows = this.db
+      .prepare(`select email from users where active = 1 and notify = 1 and email is not null and email <> '' ${adminsOnly ? "and role = 'admin'" : ""}`)
+      .all() as Row[];
+    return [...new Set(rows.map((r) => String(r.email).trim()).filter(Boolean))];
+  }
+
+  /** 알림용 숫자 (개인정보 없음) */
+  countsForNotify(sinceIso: string | null) {
+    const n = (sql: string, ...a: string[]) => Number((this.db.prepare(sql).get(...a) as Row).n);
+    const since = sinceIso ?? "1970-01-01T00:00:00Z";
+    return {
+      newSince: n("select count(*) n from inquiries where first_seen_at > ? and status = 'new'", since),
+      newSinceByRoute: {
+        auto: n("select count(*) n from inquiries where first_seen_at > ? and status = 'new' and route = 'auto'", since),
+        approve: n("select count(*) n from inquiries where first_seen_at > ? and status = 'new' and route = 'approve'", since),
+        human: n("select count(*) n from inquiries where first_seen_at > ? and status = 'new' and route = 'human'", since),
+      },
+      pending: n("select count(*) n from inquiries where status = 'new' and approved_at is null"),
+      pendingHuman: n("select count(*) n from inquiries where status = 'new' and approved_at is null and route = 'human'"),
+      approvedWaiting: n("select count(*) n from inquiries where status = 'new' and approved_at is not null"),
+    };
+  }
+
+  dueSoonCallcenter(withinMs: number): Array<{ id: number; channel: string; deadline_at: string }> {
+    const until = new Date(Date.now() + withinMs).toISOString();
+    return this.db
+      .prepare("select id, channel, deadline_at from inquiries where status = 'new' and approved_at is null and can_reply = 1 and deadline_at is not null and deadline_at <= ? and deadline_at > ?")
+      .all(until, new Date().toISOString()) as Array<{ id: number; channel: string; deadline_at: string }>;
+  }
+
+  todayStats(startIso: string) {
+    const n = (sql: string) => Number((this.db.prepare(sql).get(startIso) as Row).n);
+    return {
+      received: n("select count(*) n from inquiries where first_seen_at >= ?"),
+      approved: n("select count(*) n from approvals where action in ('approve','approve_edited') and at >= ?"),
+      closed: n("select count(*) n from approvals where action = 'close' and at >= ?"),
+    };
   }
 
   // ───────── 백업 ─────────

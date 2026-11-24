@@ -6,6 +6,8 @@ import type { HubDb, User } from "./db.ts";
 import { exportKnowledgeXlsx, parseKnowledgeXlsx } from "./excel.ts";
 import { checkEdited, processDrafts } from "./pipeline.ts";
 import type { Updater } from "./updater.ts";
+import type { Notifier } from "./notify.ts";
+import { checkFixedText, checkForbidden, MAX_REPLY_LENGTH } from "@drc/shared";
 
 /**
  * 화면 제공 + 데이터 API (메인 PC에서 실행, 같은 사무실 PC는 http://메인PC주소:3000 으로 접속)
@@ -77,6 +79,12 @@ function str(v: unknown, label: string, min = 1, max = 100): string {
   return s;
 }
 
+function emailOf(v: unknown): string {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) || s.length > 120) throw new HttpError(400, "이메일 주소를 확인하세요.");
+  return s;
+}
+
 function todayStartIso(): string {
   return new Date(`${seoulParts(new Date()).date}T00:00:00+09:00`).toISOString();
 }
@@ -106,9 +114,13 @@ export interface ServerOptions {
   updater?: Updater;
   /** 관리자가 "지금 업데이트"를 눌렀을 때 */
   onUpdate?: () => void;
+  /** true면 승인해도 마켓에 보내지 않고 "보냈을 요청"만 기록 (Phase 5 전까지) */
+  dryRun?: boolean;
+  notifier?: Notifier | null;
+  baseUrl?: string;
 }
 
-export function createHubServer({ db, webDir, backup, updater, onUpdate }: ServerOptions): Server {
+export function createHubServer({ db, webDir, backup, updater, onUpdate, dryRun = true, notifier = null, baseUrl = "" }: ServerOptions): Server {
   const limiter = new LoginLimiter();
   const webRoot = webDir ? resolve(webDir) : null;
 
@@ -156,7 +168,13 @@ export function createHubServer({ db, webDir, backup, updater, onUpdate }: Serve
     };
 
     if (path === "/api/me" && method === "GET") return send(res, 200, { user: me });
-    if (path === "/api/status" && method === "GET") return send(res, 200, { status: db.status(), now: new Date().toISOString() });
+    if (path === "/api/status" && method === "GET")
+      return send(res, 200, {
+        status: db.status(),
+        now: new Date().toISOString(),
+        dryRun,
+        notify: { configured: !!notifier, failedToday: db.failedNotificationCount(new Date(Date.now() - 86400e3).toISOString()) },
+      });
     if (path === "/api/summary" && method === "GET") return send(res, 200, db.summary(todayStartIso()));
 
     if (path === "/api/inquiries" && method === "GET") {
@@ -183,7 +201,7 @@ export function createHubServer({ db, webDir, backup, updater, onUpdate }: Serve
       const draft = db.latestDraft(Number(inq[1]));
       const used = new Set((draft?.knowledge_ids as number[]) ?? []);
       const refs = db.listKnowledge().filter((k) => used.has(Number(k.id))).map((k) => ({ id: k.id, title: k.title, conditions: k.conditions }));
-      return send(res, 200, { ...row, draft, refs });
+      return send(res, 200, { ...row, draft, refs, history: db.history(Number(inq[1])), job: db.postJob(Number(inq[1])), dryRun });
     }
     const drf = /^\/api\/inquiries\/(\d+)\/(draft|redraft)$/.exec(path);
     if (drf && method === "POST") {
@@ -194,6 +212,8 @@ export function createHubServer({ db, webDir, backup, updater, onUpdate }: Serve
         processDrafts(db);
         await db.audit("draft.regenerate", { inquiryId: id }, me.login);
       } else {
+        const other = db.lockedByOther(id, me.login);
+        if (other) throw new HttpError(409, `${other}님이 처리 중인 문의입니다.`);
         const b = await readJson(req);
         const text = str(b.text, "답변", 2, 3000);
         db.saveEditedDraft(id, text, me.login, checkEdited(text));
@@ -225,6 +245,101 @@ export function createHubServer({ db, webDir, backup, updater, onUpdate }: Serve
       send(res, 200, { ...st, restarting: true });
       onUpdate();
       return;
+    }
+
+    // ── 동시 처리 잠금 ──
+    const lk = /^\/api\/inquiries\/(\d+)\/lock$/.exec(path);
+    if (lk && method === "POST") return send(res, 200, db.lock(Number(lk[1]), me));
+    const ub = /^\/api\/inquiries\/(\d+)\/unlock-beacon$/.exec(path);
+    if (ub && method === "POST") {
+      db.unlock(Number(ub[1]), me.login); // 창을 닫을 때 브라우저가 보내는 신호 (본인 잠금만 해제)
+      return send(res, 200, { ok: true });
+    }
+    if (lk && method === "DELETE") {
+      db.unlock(Number(lk[1]), me.login);
+      return send(res, 200, { ok: true });
+    }
+
+    // ── 승인·반려·처리 완료 (모든 담당자 가능) ──
+    const dec = /^\/api\/inquiries\/(\d+)\/decision$/.exec(path);
+    if (dec && method === "POST") {
+      const id = Number(dec[1]);
+      const row = db.getInquiry(id) as Record<string, any> | null;
+      if (!row) throw new HttpError(404, "문의를 찾을 수 없습니다.");
+      const b = await readJson(req);
+      const action = String(b.action ?? "");
+      const other = db.lockedByOther(id, me.login);
+      if (other) throw new HttpError(409, `${other}님이 처리 중인 문의입니다. 잠시 후 다시 시도하세요.`);
+
+      if (action === "approve") {
+        if (row.status !== "new" || row.approved_at) throw new HttpError(409, "이미 처리된 문의입니다. 새로고침 해주세요.");
+        let draft = db.latestDraft(id) as Record<string, any> | null;
+        if (!draft) throw new HttpError(400, "초안이 없습니다.");
+        if (draft.route === "human") throw new HttpError(400, "③ 사람 전용 문의는 승인할 수 없습니다. 판매자센터에서 직접 답변한 뒤 [직접 처리 완료]를 눌러주세요.");
+        if (!row.can_reply) throw new HttpError(400, "마켓에서 지금 답변할 수 없는 상태입니다 (이미 답변됨·종료·이관 전). 판매자센터에서 확인하세요.");
+        let kind: "approve" | "approve_edited" = "approve";
+        if (typeof b.text === "string" && b.text !== draft.text) {
+          const text = str(b.text, "답변", 2, 3000);
+          db.saveEditedDraft(id, text, me.login, checkEdited(text));
+          draft = db.latestDraft(id) as Record<string, any>;
+          kind = "approve_edited";
+        }
+        const text = String(draft.text);
+        const problems = [
+          ...checkForbidden(text).map((f) => `쓰면 안 되는 표현: ${f.label} ("${f.match}")`),
+          ...checkFixedText(text),
+          ...(text.length > MAX_REPLY_LENGTH ? [`답변이 ${text.length}자로 ${MAX_REPLY_LENGTH}자를 넘습니다.`] : []),
+        ];
+        if (problems.length) return send(res, 400, { error: "승인할 수 없습니다. 아래를 고쳐주세요.", details: problems });
+        const payload = {
+          channel: row.channel,
+          kind: row.kind,
+          externalId: row.external_id,
+          content: text,
+          parentAnswerId: row.meta?.parentAnswerId ?? null,
+        };
+        if (!db.approve(id, Number(draft.id), me.name, kind, payload, dryRun)) throw new HttpError(409, "이미 처리된 문의입니다. 새로고침 해주세요.");
+        await db.audit("inquiry.approve", { id, edited: kind === "approve_edited", dryRun }, me.login);
+        return send(res, 200, { ok: true, dryRun });
+      }
+      if (action === "unapprove") {
+        if (!db.unapprove(id, me.name)) throw new HttpError(409, "승인을 취소할 수 없습니다 (이미 마켓에 등록됐거나 승인 상태가 아님).");
+        await db.audit("inquiry.unapprove", { id }, me.login);
+        return send(res, 200, { ok: true });
+      }
+      if (action === "reject") {
+        const memo = str(b.memo, "반려 사유", 1, 300);
+        const draft = db.latestDraft(id) as Record<string, any> | null;
+        db.reject(id, draft ? Number(draft.id) : null, me.name, memo);
+        await db.audit("inquiry.reject", { id, memo }, me.login);
+        return send(res, 200, { ok: true });
+      }
+      if (action === "close") {
+        const memo = typeof b.memo === "string" && b.memo.trim() ? b.memo.trim().slice(0, 300) : null;
+        if (!db.closeInquiry(id, me.name, memo)) throw new HttpError(409, "이미 처리 완료된 문의입니다.");
+        await db.audit("inquiry.close", { id }, me.login);
+        return send(res, 200, { ok: true });
+      }
+      throw new HttpError(400, "알 수 없는 처리입니다.");
+    }
+
+    // ── 알림 (관리자) ──
+    if (path === "/api/notifications" && method === "GET") {
+      requireAdmin();
+      return send(res, 200, { configured: !!notifier, recipients: db.notifyEmails(), recent: db.recentNotifications(20) });
+    }
+    if (path === "/api/notifications/test" && method === "POST") {
+      requireAdmin();
+      if (!notifier) throw new HttpError(400, "알림 메일 계정이 설정되지 않았습니다. 메인 PC에서 3-settings.bat → MAIL_USER, MAIL_PASSWORD 를 넣고 허브를 다시 켜세요.");
+      const to = db.notifyEmails();
+      if (!to.length) throw new HttpError(400, "알림 받을 이메일이 없습니다. [담당자] 메뉴에서 이메일을 넣어주세요.");
+      try {
+        await notifier.send(to, "[DRC CS] 테스트 알림", `DRC CS 허브 알림 테스트입니다. 이 메일이 보이면 알림 설정이 정상입니다.\n▶ ${baseUrl}/\n— DRC CS 허브`);
+      } catch (e) {
+        throw new HttpError(502, `메일 발송 실패: ${e instanceof Error ? e.message : String(e)} — 메일 계정·비밀번호(앱 비밀번호)와 SMTP 사용 설정을 확인하세요.`);
+      }
+      await db.audit("notify.test", { count: to.length }, me.login);
+      return send(res, 200, { ok: true, sentTo: to.length });
     }
 
     // ── 지식 DB ──
@@ -306,6 +421,7 @@ export function createHubServer({ db, webDir, backup, updater, onUpdate }: Serve
       const role = ROLES.includes(b.role as Role) ? (b.role as Role) : "agent";
       try {
         const u = db.createUser(str(b.login, "아이디", 2, 40), str(b.name, "이름", 1, 40), str(b.password, `비밀번호(${PASSWORD_MIN}자 이상)`, PASSWORD_MIN, 200), role);
+        if (typeof b.email === "string" && b.email.trim()) db.updateUser(u.id, { email: emailOf(b.email) });
         await db.audit("user.create", { login: u.login, role }, me.login);
         return send(res, 201, u);
       } catch (e) {
@@ -318,7 +434,9 @@ export function createHubServer({ db, webDir, backup, updater, onUpdate }: Serve
       requireAdmin();
       const id = Number(usr[1]);
       const b = await readJson(req);
-      const patch: { role?: Role; active?: boolean; password?: string } = {};
+      const patch: { role?: Role; active?: boolean; password?: string; email?: string | null; notify?: boolean } = {};
+      if (b.email !== undefined) patch.email = b.email ? emailOf(b.email) : null;
+      if (b.notify !== undefined) patch.notify = !!b.notify;
       if (b.role !== undefined) {
         if (!ROLES.includes(b.role as Role)) throw new HttpError(400, "역할을 확인하세요.");
         patch.role = b.role as Role;
