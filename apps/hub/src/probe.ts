@@ -4,16 +4,17 @@
  *   - 접속 성공 여부 (IP 등록·키 확인)
  *   - 가져온 건수
  *   - 응답에 들어있는 필드 이름 (값은 출력하지 않음 → 개발자에게 보내도 안전)
- * 을 보여주고 worker-data/probe-결과.txt 로 저장합니다. DB에는 아무것도 쓰지 않습니다.
+ * 을 보여주고 데이터 폴더의 probe-결과.txt 로 저장합니다. DB에는 아무것도 쓰지 않습니다.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { loadConfig, redactSecrets } from "./config.ts";
+import { join, resolve } from "node:path";
+import { loadConfig, loadSettingsFile, redactSecrets } from "./config.ts";
 import { coupangSources } from "./coupang/sources.ts";
 import { naverSources } from "./naver/sources.ts";
 import type { InquirySource } from "./source.ts";
 
 async function main() {
+  loadSettingsFile(resolve(import.meta.dirname, "../.env.example"));
   const cfg = loadConfig();
   const sources: InquirySource[] = [];
   if (cfg.naver) sources.push(...naverSources(cfg.naver));
@@ -47,7 +48,7 @@ async function main() {
     out("");
   }
 
-  const dir = join(process.cwd(), "worker-data");
+  const dir = cfg.dataDir;
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "probe-결과.txt"), lines.join("\n"), "utf8");
   console.log(`결과를 ${join(dir, "probe-결과.txt")} 에 저장했습니다.`);

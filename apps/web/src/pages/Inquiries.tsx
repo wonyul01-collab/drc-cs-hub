@@ -2,7 +2,7 @@ import { CHANNEL_LABEL, KIND_LABEL, STATUS_LABEL, type Channel, type InquiryKind
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Badge, ChannelBadge, ErrorBox, KindBadge, StatusBadge } from "../components/ui.tsx";
-import { fmtDateTime, fmtRemaining, supabase } from "../lib.ts";
+import { api, fmtDateTime, fmtRemaining } from "../lib.ts";
 
 export interface InquiryRow {
   id: number;
@@ -51,25 +51,14 @@ export default function Inquiries() {
   };
 
   useEffect(() => {
-    let query = supabase.from("inquiries").select("*", { count: "exact" });
-    if (channel) query = query.eq("channel", channel);
-    if (kind) query = query.eq("kind", kind);
-    if (status) query = query.eq("status", status);
-    if (pii) query = query.eq("pii_detected", true);
-    if (q) {
-      const safe = q.replace(/[%,()]/g, " ").trim();
-      query = query.or(`body_masked.ilike.%${safe}%,product_name.ilike.%${safe}%,title.ilike.%${safe}%,order_id.ilike.%${safe}%`);
-    }
-    query =
-      sort === "deadline"
-        ? query.order("deadline_at", { ascending: true, nullsFirst: false }).order("received_at", { ascending: false })
-        : query.order("received_at", { ascending: false });
-    query.range((page - 1) * PAGE, page * PAGE - 1).then(({ data, count, error }) => {
-      if (error) return setErr(`불러오기 실패: ${error.message}`);
-      setErr(null);
-      setRows((data ?? []) as InquiryRow[]);
-      setTotal(count ?? 0);
-    });
+    const p = new URLSearchParams({ channel, kind, status, sort, q, page: String(page), pii: pii ? "1" : "" });
+    api<{ rows: InquiryRow[]; total: number }>(`/api/inquiries?${p}`)
+      .then((r) => {
+        setErr(null);
+        setRows(r.rows);
+        setTotal(r.total);
+      })
+      .catch((e) => setErr(`불러오기 실패: ${e.message}`));
   }, [channel, kind, status, sort, pii, q, page]);
 
   const select = "min-w-0 grow basis-36 rounded-lg border-2 border-gray-300 bg-white px-3 py-2";

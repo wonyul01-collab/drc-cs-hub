@@ -2,7 +2,7 @@ import { CHANNEL_LABEL, KIND_LABEL, type Channel, type InquiryKind } from "@drc/
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card, ErrorBox } from "../components/ui.tsx";
-import { fmtDateTime, fmtRelative, supabase } from "../lib.ts";
+import { api, fmtDateTime, fmtRelative } from "../lib.ts";
 
 interface Counts {
   newTotal: number;
@@ -20,35 +20,18 @@ interface Run {
   error: string | null;
 }
 
-function todayStartIso(): string {
-  const kstDate = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
-  return new Date(`${kstDate}T00:00:00+09:00`).toISOString();
-}
-
 export default function Home() {
   const [counts, setCounts] = useState<Counts | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    (async () => {
-      const head = { count: "exact" as const, head: true };
-      const soon = new Date(Date.now() + 4 * 3600e3).toISOString();
-      const [a, b, c, d, r] = await Promise.all([
-        supabase.from("inquiries").select("id", head).eq("status", "new"),
-        supabase.from("inquiries").select("id", head).eq("status", "new").eq("can_reply", true).lte("deadline_at", soon),
-        supabase.from("inquiries").select("id", head).eq("status", "new").eq("pii_detected", true),
-        supabase.from("inquiries").select("id", head).gte("first_seen_at", todayStartIso()),
-        supabase.from("collect_runs").select("channel,kind,started_at,ok,inserted,error").order("started_at", { ascending: false }).limit(40),
-      ]);
-      const e = a.error ?? b.error ?? c.error ?? d.error ?? r.error;
-      if (e) return setErr(`불러오기 실패: ${e.message}`);
-      setCounts({ newTotal: a.count ?? 0, dueSoon: b.count ?? 0, pii: c.count ?? 0, today: d.count ?? 0 });
-      // 수집원별 가장 최근 1건
-      const latest = new Map<string, Run>();
-      for (const x of (r.data ?? []) as Run[]) if (!latest.has(`${x.channel}|${x.kind}`)) latest.set(`${x.channel}|${x.kind}`, x);
-      setRuns([...latest.values()]);
-    })();
+    api<Counts & { runs: Run[] }>("/api/summary")
+      .then((r) => {
+        setCounts(r);
+        setRuns(r.runs);
+      })
+      .catch((e) => setErr(`불러오기 실패: ${e.message}`));
   }, []);
 
   if (err) return <ErrorBox message={err} />;

@@ -4,26 +4,27 @@
 
 ## 작업 방식
 - Phase 단위로 진행. **Phase마다 멈추고** 결과·테스트 방법·다음 계획을 보고 → 담당자 승인 후 다음 Phase.
-- 현재 단계: **Phase 1 (기반 + 문의 수집) 개발 완료 → 담당자 설치·실측 대기**
+- 현재 단계: **Phase 1 (기반 + 문의 수집) 개발 완료 — 메인 PC 단독 구조로 단순화(2026-11-24) → 담당자 설치·실측 대기**
 - 외부 API 명세는 기억에 의존하지 말고 공식 문서 확인 후 `docs/api-notes.md`에 출처와 함께 기록.
 - **비용 원칙: 유료 서비스 사용 금지 (2026-11-23 담당자 결정). 월 0원 구성만.** 무료 플랜도 약관상 상업 이용 금지면 쓰지 않음 (예: Vercel Hobby).
-- 무료 구성: 웹=Cloudflare Pages(정적 React 앱), DB=Supabase Free, 작업기=사무실 PC, AI=지식DB 템플릿(→로컬 AI 선택), 알림=이메일(+무료 메신저 봇). 상세: `docs/design.md` ★ 무료 전용안.
+- **구성(2026-11-24 확정): 메인 PC 1대가 전부 담당** — 수집 + 데이터(SQLite 파일) + 화면 제공. 같은 사무실 다른 PC는 크롬으로 `http://메인PC주소:3000` 접속. 클라우드(Supabase·Cloudflare·Vercel) 사용 안 함. **단순함 최우선** — 담당자가 복잡하다고 함.
 - 알림: 텔레그램 봇(그룹방) + 이메일 대체. AI: 지식 DB 표준 답변(외부 AI 없음).
 - 경쟁사 사이트 본문·리뷰 대량 크롤링 금지. 지식 DB는 우리 회사 데이터 중심, 경쟁사는 질문 유형 참고만.
 - 고객 문의 내용을 "무료 대가로 데이터를 학습에 쓰는" 외부 AI에 보내지 않음 (예: Gemini 무료 구간).
 - 사용자는 비개발자. 설명은 쉬운 한국어, 명령어는 복사해서 바로 실행 가능하게.
 
 ## 구조
-- `apps/web` React 정적 앱 (Cloudflare Pages) — 마켓 API를 **직접 호출하지 않음**. DB에 "등록 대기"만 기록.
-- `apps/worker` Node.js 상시 실행 (고정 IP 장비) — 수집·AI·등록·알림·스케줄 전부 담당.
+- `apps/hub` 메인 PC 프로그램 1개: 문의 수집(엔진) + 데이터 보관(`node:sqlite`, 파일 1개) + 화면·API 서버(`node:http`, 포트 3000, 0.0.0.0).
+  - 데이터·설정·로그·백업: `%USERPROFILE%\DRC-CS-Hub-Data\` (코드 폴더와 분리 → ZIP 덮어써도 유지). 키는 `settings.env`에만.
+  - 로그인: 아이디/비밀번호(scrypt), 세션 쿠키. 첫 관리자는 메인 PC(localhost)에서만 생성. 담당자 계정은 관리자가 화면에서 생성.
+  - 쓰기 API는 JSON만 받음(CSRF 방지), 로그인 실패 10회/10분 차단.
+- `apps/web` Vite + React + Tailwind 화면. 허브가 `apps/web/dist`를 그대로 제공. 마켓 API를 직접 부르지 않음.
 - `packages/shared` 공통 타입, 운영시간 엔진, 공휴일 목록, 개인정보 마스킹. (Phase 2: 규칙 `rules.yaml`, 금지표현)
-- DB: `supabase/migrations/*.sql`을 Supabase SQL Editor에서 실행 (ORM 없이 SQL + supabase-js). 여러 번 실행해도 안전하게 작성.
-- 웹: Vite + React + Tailwind 정적 앱 → Cloudflare Pages. 권한은 전부 RLS로.
-- 작업기: `node --env-file=.env --import tsx src/index.ts` (빌드 없이 실행), Windows는 NSSM 서비스.
-- 네이버 엔드포인트 파라미터는 미확인 → `apps/worker/src/naver/sources.ts`의 `NAVER_ENDPOINTS`만 고치면 됨. 사무실 PC `pnpm worker:probe` 결과로 확정.
+- 사용자는 bat 파일만 씀: `1-install.bat`(npx pnpm install) · `2-start.bat`(웹 빌드+허브 실행) · `3-settings.bat`(설정 메모장) · `4-check.bat`(연결 점검). 자동 시작은 시작프로그램 폴더 바로가기.
+- 네이버 엔드포인트 파라미터는 미확인 → `apps/hub/src/naver/sources.ts`의 `NAVER_ENDPOINTS`만 고치면 됨. `4-check.bat` 결과(probe-결과.txt)로 확정.
 
 ## 명령
-- 테스트: `pnpm test` · 타입 검사: `pnpm typecheck` · 웹 빌드: `pnpm web:build`
+- 테스트: `pnpm test` · 타입 검사: `pnpm typecheck` · 허브 실행: `pnpm hub` (웹 빌드 포함)
 
 ## 운영 시간
 - 평일 09:00~18:00 Asia/Seoul (설정값). 법정공휴일·대체공휴일·회사 휴무일 제외.
@@ -37,7 +38,7 @@
 
 ## 금지 사항
 - `DRY_RUN=true` 기본. 사용자가 직접 바꾸기 전 실제 마켓 등록 금지.
-- 마켓 API 키·판매자센터 로그인 정보/세션은 **작업기에만**. Vercel·DB·로그·git에 절대 금지.
+- 마켓 API 키·판매자센터 로그인 정보는 메인 PC `settings.env`에만. DB·로그·git·화면에 절대 금지.
 - 지식DB에 없는 정보(배송일·재고·정책) 지어내기 금지. 의료기기 효능 단정·"100%·완치·부작용 없음" 금지.
 - 알림에 고객 개인정보 금지. 화면은 마스킹(홍*동).
 - 비공식 카카오톡 봇 사용 금지. 알림 링크만으로 승인되면 안 됨(로그인 필수).

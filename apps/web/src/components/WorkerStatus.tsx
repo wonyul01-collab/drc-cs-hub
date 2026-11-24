@@ -1,23 +1,23 @@
 import { useEffect, useState } from "react";
-import { fmtRelative, supabase } from "../lib.ts";
+import { api, fmtRelative } from "../lib.ts";
 
-interface Beat {
-  worker_id: string;
+interface Status {
   beat_at: string;
   mode: "operating" | "idle";
-  detail: { sources?: Array<{ label: string; ok: boolean; error?: string }> };
+  detail: { sourceCount?: number; sources?: Array<{ label: string; ok: boolean; error?: string }> };
 }
 
-/** 화면 맨 위 작업기 상태 띠 — 1분마다 새로고침 */
+/** 화면 맨 위 상태 띠 — 1분마다 새로고침 */
 export default function WorkerStatus() {
-  const [beat, setBeat] = useState<Beat | null | undefined>(undefined);
+  const [st, setSt] = useState<Status | null | undefined>(undefined);
+  const [down, setDown] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    const load = async () => {
-      const { data } = await supabase.from("worker_heartbeat").select("*").order("beat_at", { ascending: false }).limit(1);
-      if (alive) setBeat((data?.[0] as Beat) ?? null);
-    };
+    const load = () =>
+      api<{ status: Status | null }>("/api/status")
+        .then((r) => alive && (setSt(r.status), setDown(false)))
+        .catch(() => alive && setDown(true));
     load();
     const t = setInterval(load, 60_000);
     return () => {
@@ -26,17 +26,30 @@ export default function WorkerStatus() {
     };
   }, []);
 
-  if (beat === undefined) return null;
-
-  const ageMin = beat ? (Date.now() - Date.parse(beat.beat_at)) / 60000 : Infinity;
-  // 운영 중엔 1분마다, 대기 중엔 10분마다 신호 → 각각 10분/25분 넘게 없으면 멈춤
-  const stopped = !beat || ageMin > (beat.mode === "operating" ? 10 : 25);
-  const failing = beat?.detail?.sources?.filter((s) => !s.ok) ?? [];
-
-  if (stopped) {
+  if (down) {
     return (
       <div role="alert" className="bg-red-600 px-4 py-3 text-center text-lg font-bold text-white">
-        ⛔ 작업기 멈춤 — 사무실 PC를 확인하세요 (마지막 신호: {beat ? fmtRelative(beat.beat_at) : "없음"})
+        ⛔ 메인 PC에 연결할 수 없습니다 — 메인 PC가 켜져 있는지 확인하세요
+      </div>
+    );
+  }
+  if (st === undefined) return null;
+
+  const ageMin = st ? (Date.now() - Date.parse(st.beat_at)) / 60000 : Infinity;
+  const stuck = !st || ageMin > (st.mode === "operating" ? 10 : 25);
+  const failing = st?.detail?.sources?.filter((s) => !s.ok) ?? [];
+
+  if (stuck) {
+    return (
+      <div role="alert" className="bg-red-600 px-4 py-3 text-center text-lg font-bold text-white">
+        ⛔ 문의 수집이 멈췄습니다 — 메인 PC의 허브 프로그램을 다시 켜 주세요 (마지막 신호: {st ? fmtRelative(st.beat_at) : "없음"})
+      </div>
+    );
+  }
+  if (st && st.detail?.sourceCount === 0) {
+    return (
+      <div role="alert" className="bg-amber-400 px-4 py-3 text-center font-bold text-gray-900">
+        ⚠ 마켓 키가 설정되지 않아 문의를 수집하지 않습니다 — 메인 PC에서 3-settings.bat으로 키를 넣고 허브를 다시 켜세요
       </div>
     );
   }
@@ -48,8 +61,8 @@ export default function WorkerStatus() {
     );
   }
   return (
-    <div className={`px-4 py-2 text-center font-semibold ${beat!.mode === "operating" ? "bg-green-600 text-white" : "bg-gray-600 text-white"}`}>
-      {beat!.mode === "operating" ? "● 작업기 정상 작동 중" : "● 운영 시간 외 — 작업기 대기 중"} · 마지막 신호 {fmtRelative(beat!.beat_at)}
+    <div className={`px-4 py-2 text-center font-semibold text-white ${st!.mode === "operating" ? "bg-green-600" : "bg-gray-600"}`}>
+      {st!.mode === "operating" ? "● 정상 작동 중 (10분마다 문의 수집)" : "● 운영 시간 외 — 대기 중"} · 마지막 신호 {fmtRelative(st!.beat_at)}
     </div>
   );
 }

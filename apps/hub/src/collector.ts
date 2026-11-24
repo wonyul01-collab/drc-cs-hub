@@ -1,5 +1,5 @@
 import type { InquirySource } from "./source.ts";
-import type { Store } from "./store.ts";
+import type { Store } from "./db.ts";
 import { log } from "./log.ts";
 
 const DAY = 24 * 3600e3;

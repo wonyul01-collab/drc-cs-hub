@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Badge, Card, ChannelBadge, ErrorBox, KindBadge, StatusBadge } from "../components/ui.tsx";
-import { fmtDateTime, fmtRemaining, platformStatusLabel, supabase } from "../lib.ts";
+import { api, fmtDateTime, fmtRemaining, platformStatusLabel } from "../lib.ts";
 import type { InquiryRow } from "./Inquiries.tsx";
 
 export default function InquiryDetail() {
@@ -11,15 +11,9 @@ export default function InquiryDetail() {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase
-      .from("inquiries")
-      .select("*")
-      .eq("id", Number(id))
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (error) setErr(error.message);
-        setRow((data as InquiryRow) ?? null);
-      });
+    api<InquiryRow>(`/api/inquiries/${Number(id)}`)
+      .then(setRow)
+      .catch((e) => (e.status === 404 ? setRow(null) : setErr(e.message)));
   }, [id]);
 
   if (err) return <ErrorBox message={`불러오기 실패: ${err}`} />;

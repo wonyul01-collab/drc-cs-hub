@@ -1,5 +1,5 @@
 import { BUILTIN_HOLIDAYS, DEFAULT_OPERATING, type InquiryUpsert } from "@drc/shared";
-import type { CollectRun, Store } from "../src/store.ts";
+import type { CollectRun, Store } from "../src/db.ts";
 
 /** 메모리에서 동작하는 가짜 DB */
 export class FakeStore implements Store {

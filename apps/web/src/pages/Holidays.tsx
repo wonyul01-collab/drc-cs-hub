@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Badge, Card, ErrorBox } from "../components/ui.tsx";
-import { supabase, useAuth } from "../lib.ts";
+import { api, useAuth } from "../lib.ts";
 
 interface Holiday {
   date: string;
@@ -12,8 +12,8 @@ const SOURCE: Record<Holiday["source"], string> = { builtin: "법정 공휴일",
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
 
 export default function Holidays() {
-  const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin";
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [list, setList] = useState<Holiday[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [date, setDate] = useState("");
@@ -22,44 +22,41 @@ export default function Holidays() {
   const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 
   const load = () =>
-    supabase
-      .from("holidays")
-      .select("date,name,source")
-      .gte("date", today)
-      .order("date")
-      .limit(60)
-      .then(({ data, error }) => {
-        if (error) setErr(error.message);
-        setList((data ?? []) as Holiday[]);
-      });
+    api<Holiday[]>("/api/holidays")
+      .then(setList)
+      .catch((e) => setErr(e.message));
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
-    if (!date || !name.trim()) return;
-    const { error } = await supabase.from("holidays").insert({ date, name: name.trim(), source: "company", created_by: profile?.id });
-    if (error) return setErr(error.code === "23505" ? "이미 휴일로 등록된 날짜입니다." : `추가 실패: ${error.message}`);
-    setErr(null);
-    setDate("");
-    setName("");
-    load();
+    try {
+      await api("/api/holidays", { method: "POST", body: { date, name } });
+      setErr(null);
+      setDate("");
+      setName("");
+      load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
   }
 
   async function remove(d: string) {
     if (!confirm(`${d} 회사 휴무를 삭제할까요?`)) return;
-    const { error } = await supabase.from("holidays").delete().eq("date", d).eq("source", "company");
-    if (error) return setErr(`삭제 실패: ${error.message}`);
-    load();
+    try {
+      await api(`/api/holidays/${d}`, { method: "DELETE" });
+      load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
   }
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">휴무일</h1>
-      <p className="text-gray-700">휴무일에는 작업기가 수집·알림을 하지 않습니다. 법정 공휴일·대체공휴일은 자동으로 들어옵니다.</p>
+      <p className="text-gray-700">휴무일에는 문의 수집·알림을 하지 않습니다. 법정 공휴일·대체공휴일은 자동으로 들어옵니다.</p>
       {err && <ErrorBox message={err} />}
 
       {isAdmin && (
@@ -78,7 +75,7 @@ export default function Holidays() {
         {!list ? (
           <p className="mt-3">불러오는 중…</p>
         ) : list.length === 0 ? (
-          <p className="mt-3 text-gray-600">등록된 휴무일이 없습니다. (작업기를 처음 켜면 공휴일이 자동으로 채워집니다)</p>
+          <p className="mt-3 text-gray-600">등록된 휴무일이 없습니다.</p>
         ) : (
           <ul className="mt-3 divide-y divide-gray-200">
             {list.map((h) => (

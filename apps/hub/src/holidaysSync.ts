@@ -1,6 +1,6 @@
 import { BUILTIN_HOLIDAYS } from "@drc/shared";
 import { RateLimiter, requestJson, type FetchLike } from "./http.ts";
-import type { Store } from "./store.ts";
+import type { Store } from "./db.ts";
 import { log } from "./log.ts";
 
 /** 공공데이터포털 「한국천문연구원 특일 정보 — 공휴일 정보 조회」 */

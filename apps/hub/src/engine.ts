@@ -2,7 +2,7 @@ import { isOperatingTime, seoulParts, type OperatingConfig } from "@drc/shared";
 import { collectAll, type SourceResult } from "./collector.ts";
 import { syncHolidays } from "./holidaysSync.ts";
 import type { InquirySource } from "./source.ts";
-import type { Store } from "./store.ts";
+import type { Store } from "./db.ts";
 import { log } from "./log.ts";
 
 const MIN = 60_000;
@@ -72,6 +72,7 @@ export class Engine {
       await this.d.store.heartbeat(this.d.workerId, "operating", {
         lastCollectAt: this.lastCollectAt ? new Date(this.lastCollectAt).toISOString() : null,
         intervalMin: this.intervalMin,
+        sourceCount: this.d.sources.length,
         sources: this.lastResults.map((r) => ({ label: r.label, ok: r.ok, inserted: r.inserted, error: r.error?.slice(0, 200) })),
       });
       return due ? "collected" : "operating";

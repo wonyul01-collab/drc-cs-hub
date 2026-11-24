@@ -2,7 +2,11 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { seoulParts } from "@drc/shared";
 
-const LOG_DIR = join(process.cwd(), "worker-data", "logs");
+let LOG_DIR = join(process.cwd(), "worker-data", "logs");
+
+export function setLogDir(dir: string) {
+  LOG_DIR = dir;
+}
 let redact: (s: string) => string = (s) => s;
 
 export function setRedactor(fn: (s: string) => string) {

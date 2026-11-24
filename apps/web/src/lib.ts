@@ -1,27 +1,50 @@
-import { createClient, type Session } from "@supabase/supabase-js";
 import type { Role } from "@drc/shared";
 import { createContext, useContext } from "react";
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
-
-export const configured = Boolean(url && key);
-export const supabase = createClient(url ?? "http://localhost", key ?? "missing");
-
-export interface Profile {
-  id: string;
-  email: string;
-  display_name: string | null;
+export interface User {
+  id: number;
+  login: string;
+  name: string;
   role: Role;
   active: boolean;
 }
 
-export interface AuthState {
-  session: Session | null;
-  profile: Profile | null;
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
 }
 
-export const AuthContext = createContext<AuthState>({ session: null, profile: null });
+/** 메인 PC 허브에 요청 (로그인 쿠키 자동 포함) */
+export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: opts.method ?? "GET",
+      headers: opts.body !== undefined ? { "content-type": "application/json" } : undefined,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      credentials: "same-origin",
+    });
+  } catch {
+    throw new ApiError("메인 PC에 연결할 수 없습니다. 메인 PC가 켜져 있는지 확인하세요.", 0);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401 && path !== "/api/login") window.dispatchEvent(new Event("drc:logged-out"));
+    throw new ApiError((data as { error?: string }).error ?? `오류 (${res.status})`, res.status);
+  }
+  return data as T;
+}
+
+export interface AuthState {
+  user: User | null;
+  logout: () => void;
+}
+
+export const AuthContext = createContext<AuthState>({ user: null, logout: () => {} });
 export const useAuth = () => useContext(AuthContext);
 
 const KST = "Asia/Seoul";
@@ -41,8 +64,7 @@ export function fmtDateTime(iso: string | null | undefined): string {
 
 export function fmtRelative(iso: string | null | undefined): string {
   if (!iso) return "-";
-  const diff = Date.now() - Date.parse(iso);
-  const m = Math.round(diff / 60000);
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
   if (m < 1) return "방금";
   if (m < 60) return `${m}분 전`;
   const h = Math.round(m / 60);

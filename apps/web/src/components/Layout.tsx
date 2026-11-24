@@ -1,16 +1,16 @@
 import { ROLE_LABEL } from "@drc/shared";
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
-import { supabase, useAuth } from "../lib.ts";
+import { useAuth } from "../lib.ts";
 import WorkerStatus from "./WorkerStatus.tsx";
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const { profile, session } = useAuth();
+  const { user, logout } = useAuth();
   const links = [
     { to: "/", label: "홈" },
     { to: "/inquiries", label: "통합 창구" },
     { to: "/holidays", label: "휴무일" },
-    ...(profile?.role === "admin" ? [{ to: "/users", label: "담당자" }] : []),
+    ...(user?.role === "admin" ? [{ to: "/users", label: "담당자" }] : []),
   ];
 
   return (
@@ -35,9 +35,9 @@ export default function Layout({ children }: { children: ReactNode }) {
           </nav>
           <div className="ml-auto flex items-center gap-3">
             <span className="text-gray-700">
-              {profile?.display_name ?? session?.user.email} {profile && `(${ROLE_LABEL[profile.role]})`}
+              {user?.name} {user && `(${ROLE_LABEL[user.role]})`}
             </span>
-            <button className="rounded-lg border-2 border-gray-300 px-4 py-2 font-semibold" onClick={() => supabase.auth.signOut()}>
+            <button className="rounded-lg border-2 border-gray-300 px-4 py-2 font-semibold" onClick={logout}>
               로그아웃
             </button>
           </div>
