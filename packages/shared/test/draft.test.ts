@@ -18,21 +18,23 @@ const draft = (text: string, productName: string | null = null, extra: Partial<P
   makeDraft({ channel: "smartstore", text, productName, piiDetected: false, today: "2026-11-24", ...extra }, KB, PRODUCTS);
 
 describe("고정 문구 (응대 규칙 R01, 수정이력 F13·F14·F32)", () => {
-  it("문의 답변: 인사 ⏎⏎ 본문 ⏎⏎ 마무리 전문, 마무리 안 빈 줄 없음", () => {
-    const t = composeInquiryReply("본문입니다.");
-    expect(t.startsWith(`${SALIB.greeting}\n\n본문입니다.\n\n이외 문의 사항`)).toBe(true);
-    expect(t.endsWith("-고객센터 : 09:00~17:00 (주말&공휴일 제외) / 12:30~13:30 점심시간")).toBe(true);
+  it("문의 답변은 고정 문구 없이 본문만 (2026-11-25 담당자 결정)", () => {
+    expect(composeInquiryReply("  본문입니다.  ")).toBe("본문입니다.");
+  });
+  it("리뷰 답글 마무리 전문에는 빈 줄 없음, 검사 통과", () => {
+    const t = composeReviewReply("본문입니다.");
     expect(SALIB.closing.includes("\n\n")).toBe(false);
+    expect(t.endsWith("-고객센터 : 09:00~17:00 (주말&공휴일 제외) / 12:30~13:30 점심시간")).toBe(true);
     expect(checkFixedText(t)).toEqual([]);
   });
   it("리뷰 답글은 후기 감사 줄이 들어간다", () => {
     expect(composeReviewReply("감사합니다.").split("\n")[1]).toBe("소중한 후기 남겨주셔서 감사합니다!");
   });
-  it("마무리 문구가 빠지면 경고", () => {
+  it("리뷰 답글에서 마무리 문구가 빠지면 경고", () => {
     expect(checkFixedText(`${SALIB.greeting}\n\n본문`).length).toBe(1);
   });
   it("기존 답변에서 본문만 꺼내기", () => {
-    expect(stripFixedText(composeInquiryReply("가운데 본문"))).toBe("가운데 본문");
+    expect(stripFixedText(composeReviewReply("가운데 본문"))).toBe("가운데 본문");
   });
 });
 
@@ -59,7 +61,8 @@ describe("지식 DB 초안", () => {
     expect(r.route).toBe("auto");
     expect(r.usedIds).toEqual([1]);
     expect(r.text).toContain("일반 팬티 사이즈에 맞춰");
-    expect(r.text.startsWith(SALIB.greeting)).toBe(true);
+    expect(r.text.startsWith(SALIB.greeting)).toBe(false); // 문의 답변엔 고정 문구 없음
+    expect(r.text).not.toContain("상담톡 연결 방법");
   });
   it("다른 상품 답변은 쓰지 않는다 (맥시 문의에 안심퀸 답변 금지)", () => {
     const r = draft("사이즈 어떻게 골라요?", "맥시 텐셀 3장");

@@ -60,6 +60,14 @@ async function main() {
     }
   }
 
+  // 2026-11-25: 문의 답변에서 고정 인사·마무리 문구 제거 → 사람이 손대지 않은 문의 초안은 한 번 새로 만든다
+  if (!db.getSetting<boolean>("inquiry_fixed_text_removed")) {
+    const n = db.markForRedraft();
+    processDrafts(db);
+    db.setSetting("inquiry_fixed_text_removed", true);
+    if (n) log.info(`문의 초안 ${n}건을 고정 문구 없이 새로 만들었습니다.`);
+  }
+
   // 알림 (1차: 이메일)
   const notifier = cfg.smtp ? new EmailNotifier(cfg.smtp) : null;
   const privateLan = lanAddresses(cfg.port).find((u) => /\/\/(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(u));

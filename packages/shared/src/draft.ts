@@ -3,7 +3,7 @@
  *  1) 문의 분류(classify.ts)  2) 상품 식별  3) 지식 항목 점수 매기기
  *  4) 고정 인사 + 표준 답변 + 고정 마무리  5) 금지 표현·고정문구·글자 수 검사  6) 최종 처리 경로
  */
-import { composeInquiryReply, checkFixedText, SALIB, type BrandText } from "./brand.ts";
+import { composeInquiryReply, SALIB, type BrandText } from "./brand.ts";
 import { AUTO_RULES, classifyText, type Classification, type Route } from "./classify.ts";
 import { checkForbidden, type ForbiddenHit } from "./forbidden.ts";
 import type { Channel } from "./types.ts";
@@ -166,7 +166,7 @@ export function makeDraft(
   const text = composeInquiryReply(body, brand);
   const confidence = usedScores.length ? Math.min(...usedScores) : 0;
   const forbidden = checkForbidden(body);
-  const warnings = [...checkFixedText(text, brand)];
+  const warnings: string[] = [];
   if (text.length > MAX_REPLY_LENGTH) warnings.push(`답변이 ${text.length}자로 마켓 제한(${MAX_REPLY_LENGTH}자)을 넘습니다. 줄여주세요.`);
   if (!found.length) warnings.push("어떤 상품 문의인지 확인되지 않았습니다.");
   const conditions = used.map((k) => k.conditions).filter((c): c is string => !!c && !!c.trim());
@@ -185,7 +185,7 @@ export function makeDraft(
   for (const k of used) if (ROUTE_RANK[k.minRoute] > ROUTE_RANK.auto) raise(k.minRoute, `「${k.title}」 답변은 담당자 확인 후 사용하도록 지정됨`);
   if (conditions.length) raise("approve", "발송 전 확인 조건이 있는 답변 → 승인 필요");
   if (forbidden.length) raise("approve", `금지 표현 발견: ${forbidden.map((f) => f.label).join(", ")}`);
-  if (warnings.some((w) => w.includes("고정") || w.includes("제한"))) raise("approve", "고정 문구·글자 수 문제 → 승인 필요");
+  if (warnings.some((w) => w.includes("제한"))) raise("approve", "글자 수 초과 → 승인 필요");
 
   return {
     route,

@@ -1,4 +1,4 @@
-import { checkFixedText, checkForbidden, makeDraft, makeReviewDraft, type Channel } from "@drc/shared";
+import { checkForbidden, makeDraft, makeReviewDraft, type Channel } from "@drc/shared";
 import type { HubDb } from "./db.ts";
 import { log } from "./log.ts";
 
@@ -26,9 +26,9 @@ export function processDrafts(db: HubDb, limit = 200): number {
   return pending.length;
 }
 
-/** 담당자가 고친 문장 검사 */
+/** 담당자가 고친 문의 답변 검사 (고정 문구 검사 없음 — 문의 답변은 본문만) */
 export function checkEdited(text: string) {
-  return { forbidden: checkForbidden(text), warnings: checkFixedText(text) };
+  return { forbidden: checkForbidden(text), warnings: [] as string[] };
 }
 
 /** 초안이 없는 리뷰에 답글 초안 만들기 (같은 상품에 최근 쓴 문장은 피함) */

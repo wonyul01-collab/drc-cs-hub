@@ -136,8 +136,20 @@ export default function InquiryDetail() {
       const body: Record<string, unknown> = { action };
       if (action === "approve") body.text = text;
       if (memo) body.memo = memo;
-      const res = await fetch(`/api/inquiries/${row!.id}/decision`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-      const j = await res.json().catch(() => ({}));
+      const post = () => fetch(`/api/inquiries/${row!.id}/decision`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      let res = await post();
+      let j = await res.json().catch(() => ({}));
+      // 쓰면 안 되는 표현이 있으면 막지 않고 한 번 확인
+      if (res.status === 409 && j.needsConfirm) {
+        if (!confirm(`아래 표현이 들어 있습니다.\n\n${(j.details ?? []).join("\n")}\n\n그래도 이대로 승인할까요?`)) {
+          setProblems(j.details ?? []);
+          setMsg("승인하지 않았습니다. 필요하면 문장을 고쳐주세요.");
+          return;
+        }
+        body.confirmWarnings = true;
+        res = await post();
+        j = await res.json().catch(() => ({}));
+      }
       if (!res.ok) {
         setMsg(j.error ?? `실패 (${res.status})`);
         setProblems(j.details ?? []);

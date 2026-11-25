@@ -286,12 +286,12 @@ export function createHubServer({ db, webDir, backup, updater, onUpdate, dryRun 
           kind = "approve_edited";
         }
         const text = String(draft.text);
-        const problems = [
-          ...checkForbidden(text).map((f) => `쓰면 안 되는 표현: ${f.label} ("${f.match}")`),
-          ...checkFixedText(text),
-          ...(text.length > MAX_REPLY_LENGTH ? [`답변이 ${text.length}자로 ${MAX_REPLY_LENGTH}자를 넘습니다.`] : []),
-        ];
-        if (problems.length) return send(res, 400, { error: "승인할 수 없습니다. 아래를 고쳐주세요.", details: problems });
+        // 마켓 글자 수 제한은 등록 자체가 안 되므로 막는다
+        if (text.length > MAX_REPLY_LENGTH)
+          return send(res, 400, { error: "승인할 수 없습니다.", details: [`답변이 ${text.length}자로 마켓 제한(${MAX_REPLY_LENGTH}자)을 넘습니다. 줄여주세요.`] });
+        // 금지 표현은 담당자에게 한 번 확인받고 승인 (사람이 직접 판단한 경우 허용)
+        const risky = checkForbidden(text).map((f) => `쓰면 안 되는 표현: ${f.label} ("${f.match}")`);
+        if (risky.length && b.confirmWarnings !== true) return send(res, 409, { error: "확인이 필요합니다.", needsConfirm: true, details: risky });
         const payload = {
           channel: row.channel,
           kind: row.kind,
@@ -300,7 +300,7 @@ export function createHubServer({ db, webDir, backup, updater, onUpdate, dryRun 
           parentAnswerId: row.meta?.parentAnswerId ?? null,
         };
         if (!db.approve(id, Number(draft.id), me.name, kind, payload, dryRun)) throw new HttpError(409, "이미 처리된 문의입니다. 새로고침 해주세요.");
-        await db.audit("inquiry.approve", { id, edited: kind === "approve_edited", dryRun }, me.login);
+        await db.audit("inquiry.approve", { id, edited: kind === "approve_edited", dryRun, forbiddenConfirmed: risky.length > 0 }, me.login);
         return send(res, 200, { ok: true, dryRun });
       }
       if (action === "unapprove") {

@@ -112,11 +112,11 @@ describe("수집 → 분류·초안 → 화면", () => {
     expect(db.markForRedraft()).toBe(0);
   });
 
-  it("고친 문장에 금지 표현·고정문구 누락이 있으면 경고 저장", async () => {
+  it("고친 문장에 금지 표현이 있으면 경고 저장 (문의 답변은 고정 문구 검사 없음)", async () => {
     const id = (db.listInquiries({}).rows[0] as { id: number }).id;
     const r = await call(`/api/inquiries/${id}/draft`, agent, "POST", { text: "100% 새지 않습니다" });
     expect(r.json.draft.detail.forbidden.length).toBeGreaterThan(0);
-    expect(r.json.draft.detail.warnings.join(" ")).toMatch(/고정/);
+    expect(r.json.draft.detail.warnings).toEqual([]);
   });
 
   it("관리자는 답변을 끌 수 있고, 꺼진 답변은 초안에 안 씀", async () => {

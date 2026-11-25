@@ -26,9 +26,11 @@ export const SALIB: BrandText = {
   ].join("\n"),
 };
 
-/** 문의 답변: 인사말 ⏎⏎ 본문 ⏎⏎ 마무리 전문 */
-export function composeInquiryReply(body: string, brand: BrandText = SALIB): string {
-  return `${brand.greeting}\n\n${body.trim()}\n\n${brand.closing}`;
+/**
+ * 문의 답변: 본문만 (고정 인사·마무리 없음 — 2026-11-25 담당자 결정: 고정 문구는 리뷰 답글에만)
+ */
+export function composeInquiryReply(body: string, _brand: BrandText = SALIB): string {
+  return body.trim();
 }
 
 /** 리뷰 답글: 인사말 ⏎ 후기 감사 ⏎⏎ 본문 ⏎⏎ 마무리 전문 */
@@ -36,7 +38,7 @@ export function composeReviewReply(body: string, brand: BrandText = SALIB): stri
   return `${brand.greeting}\n${brand.reviewThanks}\n\n${body.trim()}\n\n${brand.closing}`;
 }
 
-/** 고정 문구가 빠지거나 바뀌지 않았는지 검사 (수정이력 F13·F14: 앞뒤 고정 문구 누락이 가장 많이 지적됨) */
+/** 고정 문구가 빠지거나 바뀌지 않았는지 검사 — 리뷰 답글에만 사용 (수정이력 F13·F14) */
 export function checkFixedText(text: string, brand: BrandText = SALIB): string[] {
   const problems: string[] = [];
   if (!text.startsWith(brand.greeting)) problems.push("첫 줄 고정 인사말이 빠졌거나 바뀌었습니다.");

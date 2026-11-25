@@ -79,19 +79,38 @@ describe("승인 흐름 (DRY_RUN — 마켓에 보내지 않고 기록만)", () 
     expect((await call(`/api/inquiries/${id}`, "kim")).json.job).toBeNull();
   });
 
-  it("수정 후 승인: 금지 표현·고정문구 누락이면 거부, 고치면 승인", async () => {
+  it("문의 답변은 고정 문구 없이 직접 고친 문장 그대로 승인 (2026-11-25)", async () => {
     const id = idOf("1");
-    const draft = (await call(`/api/inquiries/${id}`, "kim")).json.draft.text as string;
-    const bad = await call(`/api/inquiries/${id}/decision`, "kim", "POST", { action: "approve", text: draft.replace("제작되었습니다.", "제작되어 100% 새지 않습니다.") });
-    expect(bad.status).toBe(400);
-    expect(bad.json.details.join(" ")).toMatch(/100%/);
-    const noClose = await call(`/api/inquiries/${id}/decision`, "kim", "POST", { action: "approve", text: "고객님 감사합니다." });
-    expect(noClose.status).toBe(400);
-    const good = await call(`/api/inquiries/${id}/decision`, "kim", "POST", { action: "approve", text: draft.replace("제작되었습니다.", "제작된 제품입니다.") });
-    expect(good.json.ok).toBe(true);
+    const r = await call(`/api/inquiries/${id}/decision`, "kim", "POST", { action: "approve", text: "안녕하세요 고객님! 평소 입으시는 사이즈로 고르시면 됩니다. 좋은 하루 보내세요 :)" });
+    expect(r.json.ok).toBe(true);
     const d = (await call(`/api/inquiries/${id}`, "kim")).json;
-    expect(d.job.payload.content).toContain("제작된 제품입니다.");
+    expect(d.job.payload.content).toBe("안녕하세요 고객님! 평소 입으시는 사이즈로 고르시면 됩니다. 좋은 하루 보내세요 :)");
     expect(d.history.at(-1).action).toBe("approve_edited");
+    await call(`/api/inquiries/${id}/decision`, "kim", "POST", { action: "unapprove" });
+  });
+
+  it("쓰면 안 되는 표현은 막지 않고 한 번 확인 → 확인하면 승인", async () => {
+    const id = idOf("1");
+    const risky = "세탁해도 100% 새지 않습니다.";
+    const first = await call(`/api/inquiries/${id}/decision`, "kim", "POST", { action: "approve", text: risky });
+    expect(first.status).toBe(409);
+    expect(first.json.needsConfirm).toBe(true);
+    expect(first.json.details.join(" ")).toMatch(/100%/);
+    const ok = await call(`/api/inquiries/${id}/decision`, "kim", "POST", { action: "approve", text: risky, confirmWarnings: true });
+    expect(ok.json.ok).toBe(true);
+    await call(`/api/inquiries/${id}/decision`, "kim", "POST", { action: "unapprove" });
+  });
+
+  it("마켓 글자 수(1000자)를 넘으면 승인 불가", async () => {
+    const id = idOf("1");
+    const r = await call(`/api/inquiries/${id}/decision`, "kim", "POST", { action: "approve", text: "가".repeat(1001) });
+    expect(r.status).toBe(400);
+    expect(r.json.details.join(" ")).toMatch(/1000자/);
+  });
+
+  it("다시 승인 → 최종 상태", async () => {
+    const id = idOf("1");
+    expect((await call(`/api/inquiries/${id}/decision`, "kim", "POST", { action: "approve", text: "평소 사이즈로 고르시면 됩니다." })).json.ok).toBe(true);
   });
 
   it("③ 사람 전용은 승인 불가, 직접 처리 완료만", async () => {
